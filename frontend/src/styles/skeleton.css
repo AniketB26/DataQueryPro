@@ -1,0 +1,95 @@
+/* Skeleton Loading Animations */
+
+@keyframes loading {
+    0% {
+        background-color: var(--skeleton-bg);
+    }
+    50% {
+        background-color: var(--skeleton-shimmer);
+    }
+    100% {
+        background-color: var(--skeleton-bg);
+    }
+}
+
+.skeleton-line {
+    height: 12px;
+    background-color: var(--skeleton-bg);
+    border-radius: 4px;
+    animation: loading 1.5s infinite;
+    margin-bottom: 8px;
+}
+
+.skeleton-line.short {
+    width: 60%;
+}
+
+.skeleton-line.medium {
+    width: 80%;
+}
+
+.skeleton-line.long {
+    width: 100%;
+}
+
+.message-skeleton {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 16px;
+    padding: 12px;
+}
+
+.skeleton-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background-color: var(--skeleton-bg);
+    animation: loading 1.5s infinite;
+    flex-shrink: 0;
+}
+
+.skeleton-content {
+    flex: 1;
+}
+
+.table-skeleton {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.skeleton-header,
+.skeleton-row {
+    display: flex;
+    gap: 12px;
+    padding: 12px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.skeleton-cell {
+    flex: 1;
+    height: 16px;
+    background-color: var(--skeleton-bg);
+    border-radius: 4px;
+    animation: loading 1.5s infinite;
+}
+
+.form-skeleton {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.skeleton-input {
+    height: 40px;
+    background-color: var(--skeleton-bg);
+    border-radius: 4px;
+    animation: loading 1.5s infinite;
+}
+
+.skeleton-button {
+    height: 40px;
+    background-color: var(--skeleton-bg);
+    border-radius: 4px;
+    animation: loading 1.5s infinite;
+    margin-top: 8px;
+}

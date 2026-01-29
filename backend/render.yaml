@@ -1,0 +1,30 @@
+# Render.com deployment configuration
+# https://render.com/docs/yaml-spec
+
+services:
+  - type: web
+    name: dataquery-pro-backend
+    env: node
+    region: oregon
+    plan: free
+    branch: main
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 5000
+      - key: JWT_SECRET
+        sync: false  # Set manually in dashboard
+      - key: MONGODB_URI
+        sync: false  # Set manually in dashboard
+      - key: GROQ_API_KEY
+        sync: false  # Set manually in dashboard
+      - key: GOOGLE_CLIENT_ID
+        sync: false  # Set manually in dashboard
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false  # Set manually in dashboard
+      - key: CORS_ORIGIN
+        value: https://your-frontend-domain.netlify.app  # Update with actual frontend URL
+    healthCheckPath: /api/health
