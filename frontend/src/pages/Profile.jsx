@@ -1,8 +1,7 @@
 /**
  * Profile Page Component
  * 
- * User profile with activity history and settings.
- * Allows users to update their name and change password.
+ * Simple user profile with login info and account settings.
  */
 
 import React, { useState, useEffect } from 'react';
@@ -12,8 +11,7 @@ import { authAPI } from '../services/api';
 import { useNotification } from '../context/NotificationContext';
 import {
   FiUser, FiMail, FiCalendar, FiClock, FiDatabase,
-  FiLogOut, FiActivity, FiSettings, FiChevronRight,
-  FiHome, FiBook, FiBriefcase, FiEdit2, FiShield,
+  FiLogOut, FiHome, FiBook, FiBriefcase, FiEdit2, FiShield,
   FiX, FiCheck, FiLock, FiEye, FiEyeOff
 } from 'react-icons/fi';
 import toast from 'react-hot-toast';
@@ -22,7 +20,6 @@ function Profile() {
   const { user, logout } = useAuth();
   const { showError } = useNotification();
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState('overview');
 
   // Modal states
   const [showEditNameModal, setShowEditNameModal] = useState(false);
@@ -133,12 +130,6 @@ function Profile() {
   // Check if user is Google OAuth user
   const isGoogleUser = user?.authProvider === 'google';
 
-  const stats = [
-    { label: 'Queries Made', value: '0', icon: FiDatabase },
-    { label: 'Connections', value: '0', icon: FiActivity },
-    { label: 'Sessions', value: '1', icon: FiClock },
-  ];
-
   return (
     <div className="profile-page">
       {/* Navigation */}
@@ -185,189 +176,115 @@ function Profile() {
           </button>
         </div>
 
-        {/* Profile Tabs */}
-        <div className="profile-tabs">
-          <button
-            className={`tab-btn ${activeTab === 'overview' ? 'active' : ''}`}
-            onClick={() => setActiveTab('overview')}
-          >
-            <FiUser /> Overview
-          </button>
-          <button
-            className={`tab-btn ${activeTab === 'activity' ? 'active' : ''}`}
-            onClick={() => setActiveTab('activity')}
-          >
-            <FiActivity /> Activity
-          </button>
-          <button
-            className={`tab-btn ${activeTab === 'settings' ? 'active' : ''}`}
-            onClick={() => setActiveTab('settings')}
-          >
-            <FiSettings /> Settings
-          </button>
-        </div>
-
-        {/* Tab Content */}
+        {/* Simple Profile Content */}
         <div className="profile-content">
-          {activeTab === 'overview' && (
-            <div className="overview-tab">
-              {/* Stats Cards */}
-              <div className="stats-grid">
-                {stats.map((stat, index) => (
-                  <div key={index} className="stat-card">
-                    <stat.icon className="stat-icon" />
-                    <div className="stat-info">
-                      <span className="stat-value">{stat.value}</span>
-                      <span className="stat-label">{stat.label}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              {/* Account Details */}
-              <div className="details-card">
-                <h3>Account Details</h3>
-                <div className="details-grid">
-                  <div className="detail-item">
-                    <FiUser className="detail-icon" />
-                    <div>
-                      <span className="detail-label">Full Name</span>
-                      <span className="detail-value">{user?.fullName || 'Not set'}</span>
-                    </div>
-                  </div>
-                  <div className="detail-item">
-                    <FiMail className="detail-icon" />
-                    <div>
-                      <span className="detail-label">Email</span>
-                      <span className="detail-value">{user?.email}</span>
-                    </div>
-                  </div>
-                  <div className="detail-item">
-                    <FiCalendar className="detail-icon" />
-                    <div>
-                      <span className="detail-label">Member Since</span>
-                      <span className="detail-value">{formatDate(user?.createdAt)}</span>
-                    </div>
-                  </div>
-                  <div className="detail-item">
-                    <FiClock className="detail-icon" />
-                    <div>
-                      <span className="detail-label">Last Login</span>
-                      <span className="detail-value">{formatDate(user?.lastLogin)}</span>
-                    </div>
-                  </div>
+          {/* Account Details */}
+          <div className="details-card">
+            <h3>Account Information</h3>
+            <div className="details-grid">
+              <div className="detail-item">
+                <FiUser className="detail-icon" />
+                <div>
+                  <span className="detail-label">Full Name</span>
+                  <span className="detail-value">{user?.fullName || 'Not set'}</span>
                 </div>
               </div>
-
-              {/* Quick Actions */}
-              <div className="quick-actions">
-                <h3>Quick Actions</h3>
-                <div className="actions-grid">
-                  <Link to="/work" className="action-card">
-                    <FiBriefcase />
-                    <span>Start Working</span>
-                    <FiChevronRight />
-                  </Link>
-                  <Link to="/tutorial" className="action-card">
-                    <FiBook />
-                    <span>View Tutorials</span>
-                    <FiChevronRight />
-                  </Link>
+              <div className="detail-item">
+                <FiMail className="detail-icon" />
+                <div>
+                  <span className="detail-label">Email</span>
+                  <span className="detail-value">{user?.email}</span>
+                </div>
+              </div>
+              <div className="detail-item">
+                <FiUser className="detail-icon" />
+                <div>
+                  <span className="detail-label">Username</span>
+                  <span className="detail-value">@{user?.username}</span>
+                </div>
+              </div>
+              <div className="detail-item">
+                <FiShield className="detail-icon" />
+                <div>
+                  <span className="detail-label">Login Method</span>
+                  <span className="detail-value">
+                    {isGoogleUser ? 'Google Account' : 'Email & Password'}
+                  </span>
+                </div>
+              </div>
+              <div className="detail-item">
+                <FiCalendar className="detail-icon" />
+                <div>
+                  <span className="detail-label">Member Since</span>
+                  <span className="detail-value">{formatDate(user?.createdAt)}</span>
+                </div>
+              </div>
+              <div className="detail-item">
+                <FiClock className="detail-icon" />
+                <div>
+                  <span className="detail-label">Last Login</span>
+                  <span className="detail-value">{formatDate(user?.lastLogin)}</span>
                 </div>
               </div>
             </div>
-          )}
+          </div>
 
-          {activeTab === 'activity' && (
-            <div className="activity-tab">
-              <div className="activity-card">
-                <h3>Recent Activity</h3>
-                <div className="activity-list">
-                  <div className="activity-item">
-                    <div className="activity-icon login">
-                      <FiShield />
-                    </div>
-                    <div className="activity-details">
-                      <span className="activity-title">Logged in</span>
-                      <span className="activity-time">{formatDate(user?.lastLogin)}</span>
-                    </div>
-                  </div>
-                  <div className="activity-item">
-                    <div className="activity-icon signup">
-                      <FiUser />
-                    </div>
-                    <div className="activity-details">
-                      <span className="activity-title">Account created</span>
-                      <span className="activity-time">{formatDate(user?.createdAt)}</span>
-                    </div>
+          {/* Account Settings */}
+          <div className="settings-card">
+            <h3>Account Settings</h3>
+            <div className="settings-list">
+              {/* Edit Profile */}
+              <div className="settings-item">
+                <div className="settings-info">
+                  <FiEdit2 />
+                  <div>
+                    <span className="settings-title">Edit Name</span>
+                    <span className="settings-desc">Update your display name</span>
                   </div>
                 </div>
-                <p className="activity-note">
-                  More detailed activity tracking coming soon!
-                </p>
+                <button
+                  className="btn btn-primary btn-sm"
+                  onClick={() => setShowEditNameModal(true)}
+                >
+                  Edit
+                </button>
               </div>
-            </div>
-          )}
 
-          {activeTab === 'settings' && (
-            <div className="settings-tab">
-              <div className="settings-card">
-                <h3>Account Settings</h3>
-                <div className="settings-list">
-                  {/* Edit Profile */}
-                  <div className="settings-item">
-                    <div className="settings-info">
-                      <FiEdit2 />
-                      <div>
-                        <span className="settings-title">Edit Profile</span>
-                        <span className="settings-desc">Update your name and details</span>
-                      </div>
-                    </div>
-                    <button
-                      className="btn btn-primary btn-sm"
-                      onClick={() => setShowEditNameModal(true)}
-                    >
-                      Edit
-                    </button>
-                  </div>
-
-                  {/* Change Password */}
-                  <div className="settings-item">
-                    <div className="settings-info">
-                      <FiShield />
-                      <div>
-                        <span className="settings-title">Change Password</span>
-                        <span className="settings-desc">
-                          {isGoogleUser
-                            ? 'Not available for Google accounts'
-                            : 'Update your password'}
-                        </span>
-                      </div>
-                    </div>
-                    <button
-                      className="btn btn-primary btn-sm"
-                      onClick={() => setShowChangePasswordModal(true)}
-                      disabled={isGoogleUser}
-                    >
-                      {isGoogleUser ? 'N/A' : 'Change'}
-                    </button>
-                  </div>
-
-                  {/* Logout */}
-                  <div className="settings-item danger">
-                    <div className="settings-info">
-                      <FiLogOut />
-                      <div>
-                        <span className="settings-title">Logout</span>
-                        <span className="settings-desc">Sign out of your account</span>
-                      </div>
-                    </div>
-                    <button className="btn btn-danger btn-sm" onClick={handleLogout}>Logout</button>
+              {/* Change Password */}
+              <div className="settings-item">
+                <div className="settings-info">
+                  <FiLock />
+                  <div>
+                    <span className="settings-title">Change Password</span>
+                    <span className="settings-desc">
+                      {isGoogleUser
+                        ? 'Not available for Google accounts'
+                        : 'Update your password'}
+                    </span>
                   </div>
                 </div>
+                <button
+                  className="btn btn-primary btn-sm"
+                  onClick={() => setShowChangePasswordModal(true)}
+                  disabled={isGoogleUser}
+                >
+                  {isGoogleUser ? 'N/A' : 'Change'}
+                </button>
+              </div>
+
+              {/* Logout */}
+              <div className="settings-item danger">
+                <div className="settings-info">
+                  <FiLogOut />
+                  <div>
+                    <span className="settings-title">Logout</span>
+                    <span className="settings-desc">Sign out of your account</span>
+                  </div>
+                </div>
+                <button className="btn btn-danger btn-sm" onClick={handleLogout}>Logout</button>
               </div>
             </div>
-          )}
+          </div>
         </div>
       </div>
 
@@ -376,7 +293,7 @@ function Profile() {
         <div className="modal-overlay" onClick={() => setShowEditNameModal(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3>Edit Profile</h3>
+              <h3>Edit Name</h3>
               <button
                 className="modal-close"
                 onClick={() => setShowEditNameModal(false)}
