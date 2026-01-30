@@ -1,11 +1,11 @@
 # DataQuery Pro
 
-A full-stack web application that allows users to connect their databases and query them using natural language. The application uses OpenAI's GPT-4 to translate English questions into executable database queries.
+A full-stack web application that allows users to connect their databases and query them using natural language. The application uses **Groq AI (LLaMA 3.3 70B)** to translate English questions into executable database queries.
 
 ## Features
 
 ### Core Features
-- **JWT Authentication** - Secure login/signup system with password hashing
+- **User Authentication** - JWT-based login/signup with password hashing + Google OAuth Sign-In
 - **Multiple Database Support**:
   - SQL Databases (MySQL, PostgreSQL, SQLite)
   - NoSQL (MongoDB)
@@ -17,9 +17,10 @@ A full-stack web application that allows users to connect their databases and qu
 - **Export Results** - Download query results as CSV
 
 ### Technical Features
-- **OpenAI API Direct Integration** - No LangChain dependency
+- **Groq AI Integration** - Fast LLaMA 3.3 70B inference via Groq API
+- **MongoDB Atlas** - Cloud-based user persistence
 - **Unified Connector Interface** - `connect()`, `getSchema()`, `runQuery()`, `close()`
-- **Session-based Connections** - Credentials stored only in memory
+- **Session-based Connections** - Database credentials stored only in memory
 - **Query Validation** - Prevents destructive operations by default
 
 ## Project Structure
@@ -31,35 +32,26 @@ DataBaseProject/
 │   │   ├── index.js           # Entry point
 │   │   ├── config/            # Configuration
 │   │   ├── controllers/       # Request handlers
+│   │   ├── db/                # MongoDB connection
 │   │   ├── db_connectors/     # Database connectors
 │   │   │   ├── BaseConnector.js
 │   │   │   ├── SQLConnector.js
 │   │   │   ├── MongoConnector.js
 │   │   │   └── FileConnector.js
 │   │   ├── middleware/        # Auth & error handling
-│   │   ├── openai/            # OpenAI query translator
+│   │   ├── models/            # Mongoose models (User, etc.)
 │   │   ├── routes/            # API routes
-│   │   └── services/          # Business logic
+│   │   └── services/          # Business logic (auth, AI)
 │   ├── package.json
 │   └── .env.example
 │
-└── frontend/                   # React frontend
+└── frontend/                   # React + Vite frontend
     ├── src/
     │   ├── main.jsx           # Entry point
     │   ├── App.jsx            # Main app with routing
     │   ├── components/        # Reusable components
-    │   │   ├── DBConnectionForm.jsx
-    │   │   ├── MessageBubble.jsx
-    │   │   ├── ResultTable.jsx
-    │   │   └── Sidebar.jsx
     │   ├── context/           # React context providers
-    │   │   ├── AuthContext.jsx
-    │   │   └── ConnectionContext.jsx
     │   ├── pages/             # Page components
-    │   │   ├── Login.jsx
-    │   │   ├── Signup.jsx
-    │   │   ├── Home.jsx
-    │   │   └── ChatPage.jsx
     │   ├── services/          # API client
     │   └── styles/            # CSS styles
     ├── package.json
@@ -71,7 +63,8 @@ DataBaseProject/
 ### Prerequisites
 - Node.js 18+ 
 - npm or yarn
-- OpenAI API key
+- Groq API key (free at [console.groq.com](https://console.groq.com/keys))
+- MongoDB Atlas account (free tier available)
 
 ### Backend Setup
 
@@ -90,9 +83,17 @@ DataBaseProject/
    cp .env.example .env
    ```
 
-4. Edit `.env` and add your OpenAI API key:
-   ```
-   OPENAI_API_KEY=your-openai-api-key-here
+4. Edit `.env` and configure:
+   ```env
+   # Groq AI (REQUIRED)
+   GROQ_API_KEY=your-groq-api-key-here
+   
+   # MongoDB Atlas (REQUIRED)
+   MONGO_URI=mongodb+srv://username:password@cluster.mongodb.net/DataQueryPro
+   
+   # Google OAuth (for Google Sign-In)
+   GOOGLE_CLIENT_ID=your-google-client-id
+   GOOGLE_CLIENT_SECRET=your-google-client-secret
    ```
 
 5. Start the server:
@@ -114,7 +115,13 @@ DataBaseProject/
    npm install
    ```
 
-3. Start the development server:
+3. Create `.env` file:
+   ```env
+   VITE_API_URL=http://localhost:5000/api
+   VITE_GOOGLE_CLIENT_ID=your-google-client-id
+   ```
+
+4. Start the development server:
    ```bash
    npm run dev
    ```
@@ -127,8 +134,11 @@ DataBaseProject/
 ```
 POST /api/auth/signup    - Register new user
 POST /api/auth/login     - Login and get token
+POST /api/auth/google    - Google OAuth login
 GET  /api/auth/me        - Get current user
 POST /api/auth/logout    - Logout user
+PUT  /api/auth/profile   - Update user profile
+PUT  /api/auth/password  - Change password
 ```
 
 ### Database Connections
@@ -149,44 +159,46 @@ POST /api/chat/clear     - Clear chat history
 GET  /api/chat/export    - Export chat data
 ```
 
-## Database Connector Interface
-
-All connectors implement a unified interface:
-
-```javascript
-class BaseConnector {
-  async connect()           // Establish connection
-  async getSchema()         // Get database schema
-  async runQuery(query)     // Execute query
-  async close()             // Close connection
-  formatSchemaForAI()       // Format schema for OpenAI
-  validateQuery(query)      // Validate query safety
-}
-```
-
 ## Environment Variables
 
 ### Backend (.env)
-```
+```env
+# Server
 PORT=5000
 NODE_ENV=development
+
+# JWT
 JWT_SECRET=your-jwt-secret
 JWT_EXPIRES_IN=24h
-OPENAI_API_KEY=your-openai-api-key
-OPENAI_MODEL=gpt-4-1106-preview
+
+# Groq AI (REQUIRED)
+GROQ_API_KEY=your-groq-api-key
+GROQ_MODEL=llama-3.3-70b-versatile
+
+# MongoDB Atlas (REQUIRED)
+MONGO_URI=mongodb+srv://user:pass@cluster.mongodb.net/DataQueryPro
+
+# File Uploads
 UPLOAD_DIR=./uploads
 MAX_FILE_SIZE=52428800
+
+# CORS
 CORS_ORIGIN=http://localhost:3000
+
+# Google OAuth
+GOOGLE_CLIENT_ID=your-google-client-id
+GOOGLE_CLIENT_SECRET=your-google-client-secret
 ```
 
 ### Frontend (.env)
-```
+```env
 VITE_API_URL=http://localhost:5000/api
+VITE_GOOGLE_CLIENT_ID=your-google-client-id
 ```
 
 ## Usage
 
-1. **Sign Up/Login** - Create an account or login
+1. **Sign Up/Login** - Create an account or sign in with Google
 2. **Connect Database** - Select your database type and enter connection details
 3. **Ask Questions** - Type natural language questions in the chat
 4. **View Results** - See formatted results in tables
@@ -214,8 +226,6 @@ For Excel/CSV:
 
 ## Google OAuth Setup
 
-To enable "Sign in with Google":
-
 1. Go to [Google Cloud Console](https://console.cloud.google.com/)
 2. Create a new project or select existing
 3. Navigate to **APIs & Services > Credentials**
@@ -223,20 +233,8 @@ To enable "Sign in with Google":
 5. Add authorized origins:
    - Development: `http://localhost:3000`
    - Production: Your frontend domain
-6. Add authorized redirect URIs as needed
-7. Copy the **Client ID** and **Client Secret**
-8. Add to your `.env` files:
-
-**Backend (.env):**
-```
-GOOGLE_CLIENT_ID=your-client-id
-GOOGLE_CLIENT_SECRET=your-client-secret
-```
-
-**Frontend (.env):**
-```
-VITE_GOOGLE_CLIENT_ID=your-client-id
-```
+6. Copy the **Client ID** and **Client Secret**
+7. Add to your `.env` files (both backend and frontend)
 
 ## Deployment
 
@@ -244,35 +242,63 @@ VITE_GOOGLE_CLIENT_ID=your-client-id
 
 1. Push code to GitHub
 2. Import project in [Vercel](https://vercel.com)
-3. Set environment variables:
-   - `VITE_API_URL`: Your backend URL (e.g., `https://api.yourdomain.com/api`)
+3. Set root directory to `frontend`
+4. Set environment variables:
+   - `VITE_API_URL`: Your backend URL
    - `VITE_GOOGLE_CLIENT_ID`: Your Google Client ID
-4. Deploy
+5. Deploy
 
 ### Frontend (Netlify)
 
 1. Push code to GitHub
 2. Import project in [Netlify](https://netlify.com)
-3. Build command: `npm run build`
-4. Publish directory: `dist`
-5. Set environment variables in Site Settings
-6. Deploy
+3. Base directory: `frontend`
+4. Build command: `npm run build`
+5. Publish directory: `dist`
+6. Set environment variables in Site Settings
+7. Deploy
+
+### Backend (Railway) ⭐ Recommended
+
+Railway provides easy Node.js deployment with free tier.
+
+1. Push code to GitHub
+2. Go to [Railway](https://railway.app) and create new project
+3. Select **Deploy from GitHub repo**
+4. Choose your repository and select `backend` folder as root
+5. Railway will auto-detect Node.js
+6. Add environment variables in the **Variables** tab:
+   ```
+   NODE_ENV=production
+   PORT=5000
+   JWT_SECRET=your-secure-random-string
+   MONGO_URI=mongodb+srv://user:pass@cluster.mongodb.net/DataQueryPro
+   GROQ_API_KEY=your-groq-api-key
+   GOOGLE_CLIENT_ID=your-google-client-id
+   GOOGLE_CLIENT_SECRET=your-google-client-secret
+   CORS_ORIGIN=https://your-frontend-domain.vercel.app
+   ```
+7. Deploy and copy the generated Railway URL
+8. Update your frontend's `VITE_API_URL` to use the Railway URL
 
 ### Backend (Render)
 
 1. Push code to GitHub
 2. Create a new **Web Service** in [Render](https://render.com)
 3. Connect your repository
-4. Set environment variables:
+4. Root directory: `backend`
+5. Build command: `npm install`
+6. Start command: `npm start`
+7. Set environment variables:
    - `NODE_ENV`: `production`
    - `PORT`: `5000`
    - `JWT_SECRET`: A secure random string
-   - `MONGODB_URI`: Your MongoDB connection string
-   - `OPENAI_API_KEY`: Your OpenAI API key
+   - `MONGO_URI`: Your MongoDB Atlas connection string
+   - `GROQ_API_KEY`: Your Groq API key
    - `GOOGLE_CLIENT_ID`: Your Google Client ID
    - `GOOGLE_CLIENT_SECRET`: Your Google Client Secret
    - `CORS_ORIGIN`: Your frontend URL
-5. Deploy
+8. Deploy
 
 ### Backend (Docker)
 
@@ -284,14 +310,25 @@ docker run -p 5000:5000 --env-file .env dataquery-pro-backend
 
 ## Production Checklist
 
+- [x] Use MongoDB Atlas for cloud database
+- [x] Configure Groq AI for query generation
 - [ ] Set strong `JWT_SECRET` (use `openssl rand -hex 32`)
 - [ ] Configure CORS for your frontend domain
-- [ ] Use MongoDB Atlas or managed database
 - [ ] Enable HTTPS on both frontend and backend
 - [ ] Set up proper error monitoring (Sentry, etc.)
 - [ ] Configure rate limiting for production traffic
+- [ ] Update Google OAuth authorized origins for production
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|------------|
+| Frontend | React 19, Vite, React Router |
+| Backend | Node.js, Express |
+| Database | MongoDB Atlas (users), Any SQL/NoSQL (queries) |
+| AI | Groq API (LLaMA 3.3 70B) |
+| Auth | JWT, bcrypt, Google OAuth |
 
 ## License
 
 MIT
-

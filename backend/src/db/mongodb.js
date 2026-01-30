@@ -10,12 +10,17 @@ const config = require('../config');
 const connectMongoDB = async () => {
     try {
         const mongoUri = config.mongodb.uri;
-        
+
         if (!mongoUri) {
             throw new Error('MongoDB URI not configured');
         }
 
-        const conn = await mongoose.connect(mongoUri);
+        const conn = await mongoose.connect(mongoUri, {
+            serverSelectionTimeoutMS: 5000,
+            socketTimeoutMS: 45000,
+            retryWrites: true,
+            w: 'majority'
+        });
 
         console.log(`✅ MongoDB connected: ${conn.connection.host}`);
         return conn;

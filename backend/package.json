@@ -5,7 +5,7 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "nodemon src/index.js",
+    "dev": "set NODE_OPTIONS=--openssl-legacy-provider && nodemon src/index.js",
     "test": "jest"
   },
   "dependencies": {

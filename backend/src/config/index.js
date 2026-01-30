@@ -33,9 +33,9 @@ const config = {
         maxFileSize: parseInt(process.env.MAX_FILE_SIZE, 10) || 52428800 // 50MB
     },
 
-    // MongoDB settings
+    // MongoDB settings (supports both MONGO_URI and MONGODB_URI)
     mongodb: {
-        uri: process.env.MONGODB_URI || 'mongodb://localhost:27017/dataquery-pro',
+        uri: process.env.MONGO_URI || process.env.MONGODB_URI || 'mongodb://localhost:27017/dataquery-pro',
         user: process.env.MONGODB_USER,
         password: process.env.MONGODB_PASSWORD
     },
