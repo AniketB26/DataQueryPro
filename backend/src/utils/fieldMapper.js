@@ -3,16 +3,17 @@
  * 
  * Maps common user terms to actual database column names.
  * Helps AI understand user intent when they don't use exact column names.
+ * Enhanced with analytics and sentiment-related mappings.
  */
 
-// Common synonyms for field names
+// Common synonyms for field names (expanded for analytics)
 const FIELD_SYNONYMS = {
     // Name variations
-    'name': ['fullName', 'firstName', 'lastName', 'username', 'displayName', 'name'],
+    'name': ['fullName', 'firstName', 'lastName', 'username', 'displayName', 'name', 'full_name', 'user_name'],
     'fullname': ['fullName', 'full_name', 'name'],
     'firstname': ['firstName', 'first_name', 'fname'],
     'lastname': ['lastName', 'last_name', 'lname', 'surname'],
-    'username': ['username', 'user_name', 'login', 'userName'],
+    'username': ['username', 'user_name', 'login', 'userName', 'user'],
 
     // ID variations
     'id': ['_id', 'id', 'Id', 'ID', 'userId', 'user_id'],
@@ -28,10 +29,11 @@ const FIELD_SYNONYMS = {
     'status': ['status', 'isActive', 'state', 'enabled'],
     'enabled': ['enabled', 'isActive', 'active'],
 
-    // Date variations
-    'created': ['createdAt', 'created_at', 'dateCreated', 'createDate'],
-    'updated': ['updatedAt', 'updated_at', 'dateUpdated', 'modifiedAt'],
-    'date': ['createdAt', 'date', 'timestamp'],
+    // Date variations (expanded for time-series analytics)
+    'created': ['createdAt', 'created_at', 'dateCreated', 'createDate', 'date', 'timestamp'],
+    'updated': ['updatedAt', 'updated_at', 'dateUpdated', 'modifiedAt', 'modified'],
+    'date': ['createdAt', 'date', 'timestamp', 'created_at', 'time', 'datetime'],
+    'time': ['time', 'timestamp', 'datetime', 'createdAt', 'date'],
     'lastlogin': ['lastLogin', 'last_login', 'lastLoginAt'],
 
     // Password (usually excluded)
@@ -44,17 +46,82 @@ const FIELD_SYNONYMS = {
 
     // Auth
     'provider': ['authProvider', 'provider', 'loginProvider'],
-    'google': ['googleId', 'google_id']
+    'google': ['googleId', 'google_id'],
+
+    // ========== ANALYTICS & RATINGS (NEW) ==========
+
+    // Rating/Score variations
+    'rating': ['rating', 'score', 'stars', 'rate', 'value', 'Rating', 'Score'],
+    'score': ['score', 'rating', 'points', 'grade', 'value', 'stars'],
+    'stars': ['stars', 'rating', 'star_rating', 'star_count'],
+    'grade': ['grade', 'score', 'rating', 'mark'],
+
+    // User/Reviewer variations
+    'user': ['user', 'username', 'author', 'reviewer', 'customer', 'member', 'account'],
+    'reviewer': ['reviewer', 'user', 'author', 'commenter', 'rater'],
+    'author': ['author', 'user', 'writer', 'creator', 'reviewer'],
+    'customer': ['customer', 'client', 'user', 'buyer', 'shopper'],
+
+    // Review/Feedback content
+    'review': ['review', 'feedback', 'comment', 'text', 'content', 'description', 'body'],
+    'comment': ['comment', 'review', 'feedback', 'text', 'note', 'remarks'],
+    'feedback': ['feedback', 'review', 'response', 'comment'],
+    'text': ['text', 'content', 'body', 'description', 'review'],
+
+    // Engagement metrics
+    'thumbsup': ['thumbs_up', 'thumbsUp', 'likes', 'upvotes', 'helpful', 'positive_votes'],
+    'thumbsdown': ['thumbs_down', 'thumbsDown', 'dislikes', 'downvotes', 'negative_votes'],
+    'likes': ['likes', 'thumbs_up', 'upvotes', 'favorites', 'hearts'],
+    'dislikes': ['dislikes', 'thumbs_down', 'downvotes'],
+    'views': ['views', 'impressions', 'visits', 'hits', 'seen'],
+    'helpful': ['helpful', 'useful', 'thumbs_up', 'positive'],
+
+    // Location/Geography
+    'country': ['country', 'nation', 'region', 'location', 'geo', 'country_code'],
+    'city': ['city', 'town', 'location', 'place'],
+    'location': ['location', 'place', 'address', 'geo', 'region', 'country'],
+    'region': ['region', 'area', 'zone', 'territory', 'country'],
+
+    // Category/Type
+    'category': ['category', 'type', 'class', 'group', 'kind', 'tag'],
+    'type': ['type', 'category', 'kind', 'class', 'genre'],
+    'tag': ['tag', 'label', 'category', 'keyword'],
+
+    // Product/App
+    'product': ['product', 'item', 'app', 'application', 'software'],
+    'app': ['app', 'application', 'software', 'program', 'product'],
+    'version': ['version', 'ver', 'release', 'build']
 };
 
-// Value mappings for filters
+// Value mappings for filters (expanded for sentiment analysis)
 const VALUE_MAPPINGS = {
+    // Status filters
     'active': { field: 'isActive', value: true },
     'inactive': { field: 'isActive', value: false },
     'enabled': { field: 'isActive', value: true },
     'disabled': { field: 'isActive', value: false },
     'verified': { field: 'isVerified', value: true },
-    'unverified': { field: 'isVerified', value: false }
+    'unverified': { field: 'isVerified', value: false },
+
+    // Sentiment-based value mappings for ratings (1-5 scale)
+    'harsh': { field: 'rating', operator: '<=', value: 2 },
+    'harshest': { field: 'rating', operator: '<=', value: 1 },
+    'negative': { field: 'rating', operator: '<=', value: 2 },
+    'bad': { field: 'rating', operator: '<=', value: 2 },
+    'poor': { field: 'rating', operator: '<=', value: 2 },
+    'worst': { field: 'rating', operator: '=', value: 1 },
+    'terrible': { field: 'rating', operator: '<=', value: 1 },
+    'low': { field: 'rating', operator: '<=', value: 2 },
+    'lowest': { field: 'rating', operator: '=', value: 1 },
+
+    'positive': { field: 'rating', operator: '>=', value: 4 },
+    'good': { field: 'rating', operator: '>=', value: 4 },
+    'great': { field: 'rating', operator: '>=', value: 4 },
+    'excellent': { field: 'rating', operator: '>=', value: 5 },
+    'best': { field: 'rating', operator: '=', value: 5 },
+    'high': { field: 'rating', operator: '>=', value: 4 },
+    'highest': { field: 'rating', operator: '=', value: 5 },
+    'top': { field: 'rating', operator: '>=', value: 4 }
 };
 
 /**

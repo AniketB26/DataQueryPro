@@ -211,7 +211,7 @@ class FileConnector extends BaseConnector {
 
     /**
      * Execute a query on the file data
-     * Supports SQL-like operations translated to JavaScript array operations
+     * Supports SQL-like operations and advanced analytics translated to JavaScript array operations
      */
     async runQuery(queryString) {
         if (!this.isConnected) {
@@ -219,8 +219,10 @@ class FileConnector extends BaseConnector {
         }
 
         try {
-            // Import table matcher for fuzzy matching
+            // Import required modules
             const { findBestTableMatch } = require('../utils/tableMatcher');
+            const StatisticalEngine = require('../analytics/StatisticalEngine');
+            const DataCleaner = require('../analytics/DataCleaner');
 
             // Parse the query operation
             const query = typeof queryString === 'string'
@@ -246,23 +248,221 @@ class FileConnector extends BaseConnector {
                 throw new Error(`Sheet/table not found: ${query.table}. Available: ${availableSheets.join(', ')}`);
             }
 
-            // Apply operations
+            // Store insights for response
+            const insights = [];
+
+            // Apply filter operations first
             if (query.filter) {
                 data = this._applyFilter(data, query.filter);
             }
 
-            if (query.select && query.select !== '*') {
+            // Apply percentile filtering (top/bottom X%)
+            if (query.percentileFilter && data.length > 0) {
+                const { type, value } = query.percentileFilter;
+                const numericCol = this._findNumericColumn(data);
+                if (numericCol) {
+                    data = StatisticalEngine.filterByPercentile(data, numericCol, value, type);
+                    insights.push(`Filtered to ${type} ${value}% by ${numericCol}`);
+                }
+            }
+
+            // Apply time-based grouping
+            if (query.timeGrouping && data.length > 0 && !query.computedMetrics) {
+                const { column, interval } = query.timeGrouping;
+                const dateCol = this._findColumnName(data[0], column) || this._findDateColumn(data);
+                const numericCol = this._findNumericColumn(data);
+
+                if (dateCol) {
+                    const aggFunc = query.aggregates && query.aggregates.length > 0
+                        ? query.aggregates[0].function.toLowerCase()
+                        : 'count';
+                    data = StatisticalEngine.groupByTimeInterval(data, dateCol, interval, numericCol || dateCol, aggFunc);
+                    insights.push(`Grouped by ${interval}`);
+                }
+            }
+
+            // Handle computedMetrics - compute statistics directly from raw data
+            // This supports grouped statistical calculations (e.g., monthly SD of ratings)
+            if (query.computedMetrics && data.length > 0) {
+                const {
+                    type,           // 'stdev', 'variance', 'avg', 'median', 'percentile', 'correlation', 'all'
+                    column,         // Column to compute statistics on
+                    column2,        // Second column for correlation
+                    groupBy,        // Optional: categorical column to group by
+                    timeGrouping,   // Optional: { column: 'date', interval: 'month' }
+                    percentileValue // Optional: percentile value (default 50)
+                } = query.computedMetrics;
+
+                // Find the actual column name (case-insensitive matching)
+                const valueCol = this._findColumnName(data[0], column) || this._findNumericColumn(data);
+
+                if (!valueCol) {
+                    throw new Error(`Cannot find numeric column "${column}" for computed metrics`);
+                }
+
+                // Handle correlation separately
+                if (type && type.toLowerCase() === 'correlation') {
+                    const col2 = this._findColumnName(data[0], column2) || null;
+                    if (!col2) {
+                        throw new Error(`Second column "${column2}" required for correlation`);
+                    }
+                    const corrResult = StatisticalEngine.computeCorrelation(data, valueCol, col2);
+                    data = [{
+                        column1: valueCol,
+                        column2: col2,
+                        correlation: corrResult.correlation,
+                        sampleSize: corrResult.sampleSize
+                    }];
+                    insights.push(`Computed correlation between ${valueCol} and ${col2}`);
+                } else {
+                    // Build grouping configuration
+                    const groupingConfig = {};
+                    if (timeGrouping) {
+                        const dateCol = this._findColumnName(data[0], timeGrouping.column) || this._findDateColumn(data);
+                        if (dateCol) {
+                            groupingConfig.column = dateCol;
+                            groupingConfig.timeInterval = timeGrouping.interval || 'month';
+                        }
+                    } else if (groupBy) {
+                        const groupCol = this._findColumnName(data[0], groupBy);
+                        if (groupCol) {
+                            groupingConfig.column = groupCol;
+                        }
+                    }
+
+                    // Determine which statistics to compute
+                    const statsToCompute = type ? type.toLowerCase() : 'all';
+                    const options = { percentileValue: percentileValue || 50 };
+
+                    // Compute statistics from raw data using groupedStatistics
+                    data = StatisticalEngine.groupedStatistics(
+                        data,
+                        valueCol,
+                        groupingConfig,
+                        statsToCompute,
+                        options
+                    );
+
+                    // Build insight message
+                    let insightMsg = `Computed ${statsToCompute} of ${valueCol}`;
+                    if (groupingConfig.timeInterval) {
+                        insightMsg += ` by ${groupingConfig.timeInterval}`;
+                    } else if (groupingConfig.column) {
+                        insightMsg += ` grouped by ${groupingConfig.column}`;
+                    }
+                    insights.push(insightMsg);
+                }
+            }
+
+            // Apply standard groupBy with aggregates
+            if (query.groupBy && !query.timeGrouping) {
+                data = this._applyGroupBy(data, query.groupBy, query.aggregates);
+            }
+
+            // Apply window functions
+            if (query.windowFunction && data.length > 0) {
+                const { type, orderBy, direction = 'DESC', window } = query.windowFunction;
+                const orderCol = this._findColumnName(data[0], orderBy) || this._findNumericColumn(data);
+
+                if (orderCol) {
+                    switch (type.toUpperCase()) {
+                        case 'RANK':
+                            data = StatisticalEngine.rank(data, orderCol, direction);
+                            break;
+                        case 'DENSE_RANK':
+                            data = StatisticalEngine.denseRank(data, orderCol, direction);
+                            break;
+                        case 'ROW_NUMBER':
+                            data = StatisticalEngine.rowNumber(data, orderCol, direction);
+                            break;
+                        case 'PERCENT_RANK':
+                            data = StatisticalEngine.percentRank(data, orderCol, direction);
+                            break;
+                        case 'RUNNING_TOTAL':
+                            data = StatisticalEngine.runningTotal(data, orderCol);
+                            break;
+                        case 'RUNNING_AVG':
+                            data = StatisticalEngine.runningAverage(data, orderCol);
+                            break;
+                        case 'ROLLING_AVG':
+                            data = StatisticalEngine.rollingAverage(data, orderCol, window || 7);
+                            break;
+                        case 'LAG':
+                            data = StatisticalEngine.lag(data, orderCol, 1, null, orderCol, direction);
+                            break;
+                        case 'LEAD':
+                            data = StatisticalEngine.lead(data, orderCol, 1, null, orderCol, direction);
+                            break;
+                        case 'NTILE':
+                            data = StatisticalEngine.ntile(data, window || 4, orderCol, direction);
+                            break;
+                    }
+                    insights.push(`Applied ${type} window function`);
+                }
+            }
+
+            // Apply statistical operations
+            if (query.statistics && data.length > 0) {
+                const { type, column, percentileValue } = query.statistics;
+                const statCol = this._findColumnName(data[0], column) || this._findNumericColumn(data);
+
+                if (statCol) {
+                    const values = data.map(r => parseFloat(r[statCol])).filter(v => !isNaN(v));
+                    let statResult = {};
+
+                    switch (type.toUpperCase()) {
+                        case 'DESCRIBE':
+                            statResult = StatisticalEngine.describe(values);
+                            statResult.column = statCol;
+                            data = [statResult];
+                            break;
+                        case 'MEDIAN':
+                            statResult = { column: statCol, median: StatisticalEngine.median(values) };
+                            data = [statResult];
+                            break;
+                        case 'MODE':
+                            statResult = { column: statCol, mode: StatisticalEngine.mode(values) };
+                            data = [statResult];
+                            break;
+                        case 'STDEV':
+                            statResult = { column: statCol, stdev: StatisticalEngine.standardDeviation(values) };
+                            data = [statResult];
+                            break;
+                        case 'PERCENTILE':
+                            statResult = {
+                                column: statCol,
+                                percentile: percentileValue,
+                                value: StatisticalEngine.percentile(values, percentileValue || 50)
+                            };
+                            data = [statResult];
+                            break;
+                        case 'OUTLIERS':
+                            const outlierInfo = StatisticalEngine.detectOutliers(values);
+                            data = data.filter(r => {
+                                const val = parseFloat(r[statCol]);
+                                return outlierInfo.outliers.includes(val);
+                            });
+                            insights.push(`Found ${outlierInfo.outliers.length} outliers`);
+                            break;
+                        case 'DISTRIBUTION':
+                        case 'VALUE_COUNTS':
+                            data = StatisticalEngine.valueCounts(data, statCol, true);
+                            break;
+                    }
+                }
+            }
+
+            // Apply column selection
+            if (query.select && query.select !== '*' && !query.statistics) {
                 data = this._applySelect(data, query.select);
             }
 
+            // Apply ordering
             if (query.orderBy) {
                 data = this._applyOrderBy(data, query.orderBy);
             }
 
-            if (query.groupBy) {
-                data = this._applyGroupBy(data, query.groupBy, query.aggregates);
-            }
-
+            // Apply limit
             if (query.limit) {
                 data = data.slice(0, query.limit);
             }
@@ -271,7 +471,8 @@ class FileConnector extends BaseConnector {
                 success: true,
                 data: data,
                 rowCount: data.length,
-                columns: data.length > 0 ? Object.keys(data[0]) : []
+                columns: data.length > 0 ? Object.keys(data[0]) : [],
+                insights: insights.length > 0 ? insights : undefined
             };
         } catch (error) {
             return {
@@ -280,6 +481,39 @@ class FileConnector extends BaseConnector {
                 query: queryString
             };
         }
+    }
+
+    /**
+     * Find first numeric column in data
+     */
+    _findNumericColumn(data) {
+        if (!data || data.length === 0) return null;
+        const columns = Object.keys(data[0]);
+
+        for (const col of columns) {
+            const sample = data.slice(0, 10).map(r => r[col]);
+            const numericCount = sample.filter(v => typeof v === 'number' || !isNaN(parseFloat(v))).length;
+            if (numericCount >= sample.length * 0.7) {
+                return col;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Find first date column in data
+     */
+    _findDateColumn(data) {
+        if (!data || data.length === 0) return null;
+        const columns = Object.keys(data[0]);
+        const dateKeywords = ['date', 'time', 'created', 'updated', 'timestamp'];
+
+        for (const col of columns) {
+            if (dateKeywords.some(kw => col.toLowerCase().includes(kw))) {
+                return col;
+            }
+        }
+        return null;
     }
 
     /**
@@ -458,6 +692,7 @@ class FileConnector extends BaseConnector {
 
     /**
      * Format schema for OpenAI prompt
+     * Note: Sample values are for type inference only, not for answering questions
      */
     formatSchemaForAI() {
         if (!this.schema) {
@@ -465,15 +700,16 @@ class FileConnector extends BaseConnector {
         }
 
         let schemaStr = `File Type: ${this.dbType.toUpperCase()}\n`;
-        schemaStr += `File: ${this.schema.fileName}\n\n`;
-        schemaStr += 'Sheets/Tables:\n';
+        schemaStr += `File: ${this.schema.fileName}\n`;
+        schemaStr += `\n⚠️ NOTE: Sample values below are for TYPE HINTS ONLY. Do NOT use them to answer questions or compute statistics. All calculations must query the full dataset.\n`;
+        schemaStr += '\nSheets/Tables:\n';
 
         for (const table of this.schema.tables) {
             schemaStr += `\n${table.name} (${table.rowCount} rows):\n`;
             for (const col of table.columns) {
                 schemaStr += `  - ${col.name}: ${col.type}`;
                 if (col.sampleValues && col.sampleValues.length > 0) {
-                    schemaStr += ` (e.g., ${col.sampleValues.slice(0, 2).join(', ')})`;
+                    schemaStr += ` [type hint: ${col.sampleValues.slice(0, 2).join(', ')}]`;
                 }
                 schemaStr += '\n';
             }

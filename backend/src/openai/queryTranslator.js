@@ -1,14 +1,20 @@
 /**
- * Groq Query Translator Module
+ * Enhanced Groq Query Translator Module
  * 
+ * Advanced AI-powered query translator with data analyst capabilities.
  * Uses Groq API (OpenAI-compatible) to translate natural language
- * questions into executable database queries. Supports SQL, MongoDB, and
- * file-based (Pandas-like) operations.
+ * questions into executable database queries with support for:
+ * - Complex analytics (window functions, percentiles, correlations)
+ * - Semantic column matching
+ * - Multi-step query reasoning
+ * - Follow-up question context
+ * - StrataScratch-level SQL problems
  */
 
 const OpenAI = require('openai');
 const config = require('../config');
 const { generateFieldMappingHints } = require('../utils/fieldMapper');
+const { analyticsEngine, SemanticMapper, QueryPlanner } = require('../analytics');
 
 // Initialize Groq client (OpenAI-compatible)
 const groq = new OpenAI({
@@ -80,93 +86,232 @@ function extractJSON(content) {
 }
 
 /**
- * System prompts for different database types
+ * Enhanced system prompts for different database types
+ * These prompts enable analyst-level query generation
  */
 const SYSTEM_PROMPTS = {
     sql: `CRITICAL: You MUST return ONLY a valid JSON object. Do NOT include any text, explanations, or markdown. Start with { and end with }.
 
-You are an expert SQL query generator.
+You are an EXPERT DATA ANALYST and SQL query generator capable of solving StrataScratch-hard level problems.
 
-FIELD MAPPING:
-- "name" → "fullName", "full_name", "firstName", "lastName", "username"
-- "id" → "id", "_id", "userId"
-- "email" → "email"
-- "active" → filter by "isActive = true" or "is_active = 1"
+=== SEMANTIC COLUMN MATCHING ===
+Use fuzzy matching for column names. User may say:
+- "name" → match: fullName, full_name, username, firstName, lastName
+- "rating/score" → match: rating, score, stars, rate, value
+- "user/reviewer" → match: user, customer, reviewer, author, member
+- "date/time" → match: date, created_at, timestamp, datetime
+- "harsh/negative" → means LOW rating (<=2)
+- "positive/good" → means HIGH rating (>=4)
 
-RETURN THIS JSON FORMAT:
-{"query":"SELECT fullName, _id FROM users WHERE isActive = true LIMIT 100","explanation":"description","confidence":0.9}
+=== ADVANCED SQL CAPABILITIES ===
+Support these operations in your queries:
+1. Window Functions:
+   - ROW_NUMBER() OVER (ORDER BY col)
+   - RANK() OVER (PARTITION BY x ORDER BY y)
+   - DENSE_RANK() OVER (ORDER BY col DESC)
+   - LAG(col, 1) OVER (ORDER BY date)
+   - LEAD(col, 1) OVER (ORDER BY date)
+   - SUM(col) OVER (ORDER BY date ROWS UNBOUNDED PRECEDING)
 
-NEVER include any text before or after the JSON. ONLY output the JSON object.`,
+2. Aggregations:
+   - COUNT, SUM, AVG, MIN, MAX
+   - COUNT(DISTINCT col)
+   - GROUP BY with HAVING
 
-    mongodb: `CRITICAL: You MUST return ONLY a valid JSON object. Do NOT include any text, explanations, or markdown. Start your response with { and end with }.
+3. Percentiles:
+   - PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY col)
+   - Top 5% → WHERE col >= (SELECT PERCENTILE_CONT(0.95)...)
 
-You are an expert MongoDB query generator.
+4. Time Analysis:
+   - DATE_TRUNC('month', date)
+   - EXTRACT(YEAR FROM date)
+   - Monthly/yearly grouping
 
-FIELD MAPPING (use these to map user terms to schema fields):
-- "name" → "fullName", "firstName", "lastName", "username"
-- "id" → "_id"
-- "email" → "email"
-- "active" / "active users" → filter by {"isActive": true}
-- "password" → "password"
+=== QUERY PATTERNS ===
+"Which user gave the harshest review?" →
+SELECT * FROM reviews ORDER BY rating ASC LIMIT 1
 
-OPERATIONS:
-- READ: find, aggregate, count, distinct
-- WRITE: insertOne, updateOne, updateMany, deleteOne, deleteMany
+"Show top 5% of ratings" →
+SELECT * FROM reviews WHERE rating >= (SELECT PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY rating) FROM reviews)
 
-FOR READ QUERIES - return this JSON:
-{"query":{"collection":"users","operation":"find","filter":{},"projection":{"fullName":1,"_id":1},"limit":100},"explanation":"description","confidence":0.9}
+"Average rating per month" →
+SELECT DATE_TRUNC('month', date) as month, AVG(rating) FROM reviews GROUP BY 1 ORDER BY 1
 
-FOR INSERT - return this JSON:
-{"query":{"collection":"users","operation":"insertOne","document":{"fullName":"value","email":"value","password":"value","username":"value","isActive":true}},"explanation":"description","confidence":0.9}
+"Rank users by score descending" →
+SELECT *, RANK() OVER (ORDER BY score DESC) as rank FROM users
 
-FOR UPDATE - return this JSON:
-{"query":{"collection":"users","operation":"updateOne","filter":{"username":"value"},"update":{"$set":{"email":"newvalue"}}},"explanation":"description","confidence":0.9}
+=== OUTPUT FORMAT ===
+{"query":"SQL_QUERY_HERE","explanation":"Brief description","confidence":0.9}
 
-FOR DELETE - return this JSON:
-{"query":{"collection":"users","operation":"deleteOne","filter":{"username":"value"}},"explanation":"description","confidence":0.9}
+NEVER include text outside JSON. Start with { and end with }.`,
 
-NEVER include any text before or after the JSON. ONLY output the JSON object.`,
+    mongodb: `CRITICAL: You MUST return ONLY a valid JSON object. Do NOT include any text, explanations, or markdown. Start with { and end with }.
+
+You are an EXPERT DATA ANALYST and MongoDB query generator.
+
+=== SEMANTIC COLUMN MATCHING ===
+- "name" → fullName, firstName, lastName, username
+- "id" → _id
+- "rating/score" → rating, score, stars
+- "harsh/negative" → filter by rating <= 2
+- "positive/good" → filter by rating >= 4
+
+=== MONGODB AGGREGATION PIPELINE ===
+For complex analytics, use aggregation pipeline:
+
+1. Grouping with aggregation:
+   {"$group": {"_id": "$category", "avgRating": {"$avg": "$rating"}, "count": {"$sum": 1}}}
+
+2. Window-like operations:
+   {"$setWindowFields": {"sortBy": {"date": 1}, "output": {"rank": {"$rank": {}}}}}
+
+3. Percentile calculation:
+   {"$group": {"_id": null, "p95": {"$percentile": {"input": "$rating", "p": [0.95], "method": "approximate"}}}}
+
+4. Time grouping:
+   {"$group": {"_id": {"$dateToString": {"format": "%Y-%m", "date": "$createdAt"}}, "count": {"$sum": 1}}}
+
+=== OPERATIONS ===
+- find: Simple queries with filter and projection
+- aggregate: Complex analytics with pipeline stages
+
+=== OUTPUT FORMAT ===
+For aggregation:
+{"query":{"collection":"reviews","operation":"aggregate","pipeline":[{"$match":{}},{"$group":{}}]},"explanation":"desc","confidence":0.9}
+
+For simple find:
+{"query":{"collection":"users","operation":"find","filter":{},"projection":{},"sort":{},"limit":100},"explanation":"desc","confidence":0.9}
+
+NEVER include text outside JSON.`,
 
     file: `CRITICAL: You MUST return ONLY a valid JSON object. Do NOT include any text before or after the JSON.
 
-You are an expert data analyst for Excel/CSV files.
+You are an EXPERT DATA ANALYST for Excel/CSV files with advanced statistical capabilities.
 
-IMPORTANT RULES:
-1. COLUMN NAMES ARE CASE-INSENSITIVE - match user input to schema columns regardless of case
-   Example: "leetcode" matches "Leetcode", "LEETCODE", "LeetCode"
-2. TABLE/SHEET NAMES ARE CASE-INSENSITIVE - match user input regardless of case
-   Example: "linked list" matches "Linked List"
-3. For NULL checks, use "IS NULL" or "IS NOT NULL" operators
-4. When user says "all data" without specifying a table, use the first table in schema
-5. Use column names EXACTLY as they appear in the schema (preserve original case)
+=== CRITICAL COMPUTATION RULES ===
+1. NEVER guess, estimate, or calculate values from the sample data shown in the schema
+2. Sample values (e.g., "3.5, 4.2") are for TYPE INFERENCE ONLY - not for answering questions
+3. ALL statistics (avg, sum, count, stdev, etc.) MUST be computed via query operations
+4. When asked "what is the average?", generate a query that COMPUTES it from ALL rows
+5. The query execution engine will compute the actual values from the FULL dataset
 
-NULL VALUE HANDLING:
-- "where X is null" → {"column": "X", "operator": "IS NULL", "value": null}
-- "where X is not null" → {"column": "X", "operator": "IS NOT NULL", "value": null}
-- "where X is empty" → {"column": "X", "operator": "IS NULL", "value": null}
+=== SEMANTIC COLUMN MATCHING ===
+Match user terms to actual columns using fuzzy matching:
+- "rating" → rating, score, stars, rate, value, Rating, RATING
+- "user" → user, username, author, reviewer, customer
+- "date" → date, time, timestamp, created_at, Date
+- "harsh/harshest" → means lowest rating (sort ASC, limit 1)
+- "best/highest" → means highest rating (sort DESC, limit 1)
+- "negative" → rating <= 2
+- "positive" → rating >= 4
 
-OUTPUT FORMAT - Return ONLY this JSON:
+=== ADVANCED ANALYTICS OPERATIONS ===
+Your queries can now include these advanced operations:
+
+1. Window Functions ("windowFunction" field):
+   - "RANK" - Rank with gaps
+   - "DENSE_RANK" - Rank without gaps
+   - "ROW_NUMBER" - Sequential numbering
+   - "PERCENT_RANK" - Percentile ranking
+   - "RUNNING_TOTAL" - Cumulative sum
+   - "RUNNING_AVG" - Cumulative average
+   - "ROLLING_AVG" - Moving average (specify window)
+   - "LAG" - Previous row value
+   - "LEAD" - Next row value
+
+2. Statistical Operations ("statistics" field):
+   - "DESCRIBE" - Full statistical summary
+   - "MEDIAN" - Median value
+   - "MODE" - Most common value
+   - "STDEV" - Standard deviation
+   - "PERCENTILE" - Specific percentile (with "percentileValue")
+   - "CORRELATION" - Correlation between columns
+   - "OUTLIERS" - Detect outliers
+
+3. Time-based Analysis ("timeGrouping" field):
+   - "month" - Group by month
+   - "year" - Group by year
+   - "week" - Group by week
+   - "day" - Group by day
+   - "quarter" - Group by quarter
+
+4. Aggregations in "aggregates" array:
+   {"function": "AVG|SUM|COUNT|MIN|MAX|MEDIAN|STDEV|VARIANCE", "column": "col", "alias": "name"}
+
+5. Percentile Filtering ("percentileFilter" field):
+   {"type": "top|bottom", "value": 5} for top/bottom 5%
+
+6. COMPUTED METRICS - COMPUTE FROM RAW DATA ("computedMetrics" field):
+   USE THIS when user asks for statistical metrics with grouping.
+   The system will compute the statistic DIRECTLY from raw data values.
+   
+   Format:
+   "computedMetrics": {
+       "type": "stdev|variance|avg|median|percentile|correlation|all",
+       "column": "Rating",
+       "groupBy": "Country",  // Optional: categorical grouping
+       "timeGrouping": {"column": "Date", "interval": "month"},  // Optional: time grouping
+       "column2": "thumbs_up",  // Required for correlation
+       "percentileValue": 95  // Optional for percentile
+   }
+   
+   EXAMPLES:
+   - "Monthly standard deviation of ratings" → use computedMetrics with type:"stdev" and timeGrouping
+   - "Variance of ratings by country" → use computedMetrics with type:"variance" and groupBy
+   - "Correlation between rating and thumbs_up" → use computedMetrics with type:"correlation"
+
+=== QUERY FORMAT ===
 {
     "query": {
-        "table": "exact_sheet_name_from_schema",
-        "select": ["column1", "column2"] or "*",
-        "filter": [{"column": "exact_column_name", "operator": "=|!=|>|<|>=|<=|LIKE|IN|IS NULL|IS NOT NULL", "value": "val"}],
-        "orderBy": {"column": "col", "direction": "ASC|DESC"},
+        "table": "SheetName",
+        "select": ["col1", "col2"] or "*",
+        "filter": [{"column": "Rating", "operator": "<=", "value": 2}],
+        "groupBy": ["Country"],
+        "aggregates": [{"function": "AVG", "column": "Rating", "alias": "avg_rating"}],
+        "windowFunction": {"type": "RANK", "orderBy": "Rating", "direction": "DESC"},
+        "statistics": {"type": "DESCRIBE", "column": "Rating"},
+        "timeGrouping": {"column": "Date", "interval": "month"},
+        "computedMetrics": {"type": "stdev", "column": "Rating", "timeGrouping": {"column": "Date", "interval": "month"}},
+        "percentileFilter": {"type": "top", "value": 5},
+        "orderBy": {"column": "Rating", "direction": "ASC"},
         "limit": 100
     },
-    "explanation": "Brief description",
-    "confidence": 0.9
+    "explanation": "Description of what this query does",
+    "confidence": 0.9,
+    "insights": ["Optional insight 1", "Optional insight 2"]
 }
 
-EXAMPLES:
-- "show all linked list" → {"query":{"table":"Linked List","select":"*","limit":100},"explanation":"Get all data from Linked List","confidence":0.95}
-- "where leetcode is null" → {"query":{"table":"TableName","select":"*","filter":[{"column":"Leetcode","operator":"IS NULL","value":null}],"limit":100},"explanation":"Filter where Leetcode is null","confidence":0.9}
+=== EXAMPLE QUERIES ===
+
+"Which user gave the harshest review?" →
+{"query":{"table":"Reviews","select":"*","orderBy":{"column":"Rating","direction":"ASC"},"limit":1},"explanation":"Find the review with lowest rating","confidence":0.95}
+
+"Show me top 5% of ratings" →
+{"query":{"table":"Reviews","select":"*","percentileFilter":{"type":"top","value":5}},"explanation":"Filter to top 5% highest ratings","confidence":0.9}
+
+"Average rating per month" →
+{"query":{"table":"Reviews","select":"*","timeGrouping":{"column":"Date","interval":"month"},"aggregates":[{"function":"AVG","column":"Rating","alias":"avg_rating"}]},"explanation":"Monthly average rating trend","confidence":0.9}
+
+"Monthly standard deviation of ratings" →
+{"query":{"table":"Reviews","computedMetrics":{"type":"stdev","column":"Rating","timeGrouping":{"column":"Date","interval":"month"}}},"explanation":"Compute standard deviation of ratings grouped by month from raw data","confidence":0.95}
+
+"Variance of ratings by country" →
+{"query":{"table":"Reviews","computedMetrics":{"type":"variance","column":"Rating","groupBy":"Country"}},"explanation":"Compute variance of ratings for each country from raw data","confidence":0.95}
+
+"Show correlation between rating and thumbs_up" →
+{"query":{"table":"Reviews","computedMetrics":{"type":"correlation","column":"Rating","column2":"thumbs_up"}},"explanation":"Calculate Pearson correlation coefficient between Rating and thumbs_up","confidence":0.95}
+
+"Rank all users by thumbs_up descending" →
+{"query":{"table":"Reviews","select":"*","windowFunction":{"type":"RANK","orderBy":"thumbs_up","direction":"DESC"}},"explanation":"Rank users by engagement","confidence":0.9}
+
+"Which country has the most negative reviews?" →
+{"query":{"table":"Reviews","select":"*","filter":[{"column":"Rating","operator":"<=","value":2}],"groupBy":["Country"],"aggregates":[{"function":"COUNT","column":"*","alias":"negative_count"}],"orderBy":{"column":"negative_count","direction":"DESC"},"limit":1},"explanation":"Country with most low ratings","confidence":0.9}
 
 NEVER include text outside the JSON. Start with { and end with }.`
 };
 
 /**
- * Generate a database query from natural language
+ * Generate a database query from natural language with advanced analytics support
  * @param {string} question - Natural language question
  * @param {string} schema - Database schema formatted for AI
  * @param {string} dbType - Database type (sql, mongodb, file)
@@ -176,13 +321,37 @@ NEVER include text outside the JSON. Start with { and end with }.`
 async function generateQuery(question, schema, dbType, conversationHistory = []) {
     const systemPrompt = getSystemPrompt(dbType);
 
+    // Get enhanced analytics hints
+    let analyticsHints = '';
+    try {
+        const schemaObj = typeof schema === 'string' ? JSON.parse(schema) : schema;
+        analyticsHints = SemanticMapper.generateSemanticHints(question, schemaObj);
+
+        // Parse intent for additional context
+        const intent = QueryPlanner.parseQueryIntent(question, schemaObj);
+        if (intent.operations.length > 0) {
+            analyticsHints += '\n\nDETECTED INTENT:\n';
+            analyticsHints += intent.operations.map(op => `- ${op.type}`).join('\n');
+        }
+        if (intent.semanticFilter) {
+            analyticsHints += `\n- Sentiment: ${intent.semanticFilter.type} (${intent.semanticFilter.term})`;
+        }
+    } catch (e) {
+        // Continue without analytics hints if parsing fails
+    }
+
     // Build messages array
     const messages = [
         { role: 'system', content: systemPrompt },
-        { role: 'user', content: `DATABASE SCHEMA: \n${schema} ` }
+        { role: 'user', content: `DATABASE SCHEMA:\n${schema}` }
     ];
 
-    // Add conversation history for context
+    // Add analytics hints if available
+    if (analyticsHints) {
+        messages.push({ role: 'user', content: analyticsHints });
+    }
+
+    // Add conversation history for context (for follow-up questions)
     for (const msg of conversationHistory.slice(-6)) { // Last 6 messages for context
         messages.push({
             role: msg.role,
@@ -193,7 +362,7 @@ async function generateQuery(question, schema, dbType, conversationHistory = [])
     // Add the current question
     messages.push({
         role: 'user',
-        content: `QUESTION: ${question} \n\nGenerate the appropriate query to answer this question.`
+        content: `QUESTION: ${question}\n\nGenerate the appropriate query to answer this question. Consider using advanced analytics features if needed.`
     });
 
     try {
@@ -212,6 +381,7 @@ async function generateQuery(question, schema, dbType, conversationHistory = [])
             query: result.query,
             explanation: result.explanation,
             confidence: result.confidence || 0.8,
+            insights: result.insights || [],
             rawResponse: content
         };
     } catch (error) {
@@ -238,18 +408,19 @@ async function fixQuery(originalQuestion, failedQuery, errorMessage, schema, dbT
 
     const messages = [
         { role: 'system', content: systemPrompt },
-        { role: 'user', content: `DATABASE SCHEMA: \n${schema} ` },
-        { role: 'user', content: `ORIGINAL QUESTION: ${originalQuestion} ` },
+        { role: 'user', content: `DATABASE SCHEMA:\n${schema}` },
+        { role: 'user', content: `ORIGINAL QUESTION: ${originalQuestion}` },
         { role: 'assistant', content: JSON.stringify({ query: failedQuery }) },
         {
             role: 'user',
             content: `The query failed with this error: ${errorMessage}
 
-Please analyze the error and generate a corrected query.Common issues to check:
-1. Table or column names might be misspelled
+Please analyze the error and generate a corrected query. Common issues to check:
+1. Table or column names might be misspelled (use fuzzy matching)
 2. Data types might not match
 3. Syntax might be incorrect for this database type
-4. JOIN conditions might be wrong
+4. Window function or aggregation syntax might be wrong
+5. For file queries, ensure JSON format is correct
 
 Generate a corrected query that will work.`
         }
@@ -276,37 +447,43 @@ Generate a corrected query that will work.`
     } catch (error) {
         return {
             success: false,
-            error: `Could not fix query: ${error.message} `,
+            error: `Could not fix query: ${error.message}`,
             query: null
         };
     }
 }
 
 /**
- * Generate a natural language response from query results
+ * Generate a natural language response from query results with insights
  * @param {string} question - Original question
  * @param {Object} queryResult - Query execution result
  * @param {string} query - The executed query
- * @returns {string} - Natural language response
+ * @returns {string} - Natural language response with insights
  */
 async function generateResponse(question, queryResult, query) {
     const messages = [
         {
             role: 'system',
-            content: `You are a database query assistant.Your ONLY purpose is to present database query results.
+            content: `You are an expert DATA ANALYST assistant reporting EXECUTED QUERY RESULTS.
 
-STRICT RULES:
-1. ONLY respond to questions about the connected database and its data
-2. If asked anything NOT related to the database(like general knowledge, coding help, conversation, etc.), respond ONLY with: "I can only help with questions about the connected database."
-3. Present data EXACTLY as returned by the query - do not add extra formatting or analysis
-4. Keep responses short and data - focused
-5. If the result is empty, say "No matching records found."
-6. If there's an error, briefly explain what went wrong
+CRITICAL RULES - FOLLOW STRICTLY:
+1. ONLY report values that appear in the RESULTS section below
+2. NEVER estimate, guess, or infer values from schema samples or previews
+3. NEVER say "based on the sample data" or "from the preview"
+4. If the result is empty, say "No matching records found"
+5. For aggregations (AVG, SUM, COUNT, STDEV, etc.), the query has ALREADY computed the value - just report it
+6. If a calculation was requested but not in results, say "The requested calculation was not returned"
 
-OUTPUT FORMAT:
-- For single values: Just state the value
-    - For tables: Present as a simple summary of the data
-        - Never add insights, patterns, or analysis unless explicitly asked`
+PRESENTATION FORMAT:
+1. Direct answer using ONLY values from the RESULTS
+2. Key insight(s) from the actual data
+3. Optional: Suggested follow-up question
+
+WHAT YOU MUST NEVER DO:
+- Use sample values from the schema to answer questions
+- Estimate averages, counts, or statistics from preview rows
+- Say "based on the first few rows" or similar
+- Make up numbers that aren't in the results`
         },
         {
             role: 'user',
@@ -314,11 +491,13 @@ OUTPUT FORMAT:
 
 QUERY EXECUTED: ${typeof query === 'string' ? query : JSON.stringify(query, null, 2)}
 
-RESULTS(${queryResult.rowCount} rows):
-${JSON.stringify(queryResult.data?.slice(0, 10), null, 2)}
-${queryResult.rowCount > 10 ? `\n... and ${queryResult.rowCount - 10} more rows` : ''}
+COMPUTED RESULTS (${queryResult.rowCount} rows):
+${JSON.stringify(queryResult.data?.slice(0, 15), null, 2)}
+${queryResult.rowCount > 15 ? `\n... and ${queryResult.rowCount - 15} more rows` : ''}
 
-Please provide a natural language response to the user's question based on these results.`
+${queryResult.insights ? `SYSTEM INSIGHTS: ${queryResult.insights.join('; ')}` : ''}
+
+Report ONLY values from these COMPUTED RESULTS. Do not estimate or infer from any other source.`
         }
     ];
 
@@ -327,14 +506,18 @@ Please provide a natural language response to the user's question based on these
             model: config.groq.model,
             messages,
             temperature: 0.5,
-            max_tokens: 500
+            max_tokens: 800
         });
 
         return response.choices[0].message.content;
     } catch (error) {
-        // Fallback to basic response
+        // Fallback to basic response with insights
         if (queryResult.success && queryResult.data) {
-            return `Found ${queryResult.rowCount} results for your query.`;
+            let response = `Found ${queryResult.rowCount} results for your query.`;
+            if (queryResult.insights && queryResult.insights.length > 0) {
+                response += `\n\nInsights:\n${queryResult.insights.map(i => `• ${i}`).join('\n')}`;
+            }
+            return response;
         }
         return `There was an issue processing your question: ${error.message}`;
     }
@@ -342,6 +525,7 @@ Please provide a natural language response to the user's question based on these
 
 /**
  * Generate query suggestions based on schema (deterministic, no AI)
+ * Now includes advanced analytics suggestions
  * @param {string|object} schema - Database schema
  * @param {string} dbType - Database type
  * @returns {Array} - List of suggested queries
@@ -361,7 +545,7 @@ function generateQuerySuggestions(schema, dbType) {
         }
 
         // Prioritize common tables
-        const priorityNames = ['users', 'user', 'customers', 'customer', 'orders', 'order', 'products', 'product', 'items', 'item'];
+        const priorityNames = ['users', 'user', 'customers', 'customer', 'orders', 'order', 'products', 'product', 'reviews', 'review', 'ratings', 'items', 'item'];
         const sortedTables = [...tables].sort((a, b) => {
             const aName = a.name.toLowerCase();
             const bName = b.name.toLowerCase();
@@ -380,7 +564,7 @@ function generateQuerySuggestions(schema, dbType) {
         for (const table of selectedTables) {
             const tableName = table.name;
             const fields = table.columns || table.fields || [];
-            const fieldNames = fields.map(f => f.name);
+            const fieldNames = fields.map(f => f.name || f);
 
             // 1. Basic show all
             suggestions.push({
@@ -388,59 +572,80 @@ function generateQuerySuggestions(schema, dbType) {
                 description: `Display all records from ${tableName}`
             });
 
-            // 2. Count total
-            suggestions.push({
-                question: `Count total ${tableName}`,
-                description: `Get the total number of ${tableName} entries`
-            });
-
-            // 3. List specific fields (pick 2 important ones)
-            const importantFields = fieldNames.filter(f =>
-                ['name', 'fullname', 'email', 'title', 'username', 'status', 'amount', 'price'].some(
-                    key => f.toLowerCase().includes(key)
+            // 2. Find numeric columns for analytics suggestions
+            const numericFields = fields.filter(f =>
+                ['number', 'integer', 'float', 'decimal'].includes(f.type?.toLowerCase()) ||
+                ['rating', 'score', 'amount', 'price', 'count', 'total'].some(n =>
+                    (f.name || f).toLowerCase().includes(n)
                 )
             );
-            if (importantFields.length >= 2) {
+
+            if (numericFields.length > 0) {
+                const numField = numericFields[0].name || numericFields[0];
+
+                // Analytics suggestion
                 suggestions.push({
-                    question: `List ${importantFields[0]} and ${importantFields[1]} from ${tableName}`,
-                    description: `Show only selected fields from ${tableName}`
+                    question: `What is the average ${numField}?`,
+                    description: `Calculate average ${numField} from ${tableName}`
                 });
-            } else if (fieldNames.length >= 2) {
-                const f1 = fieldNames.find(f => f !== '_id' && f !== 'id') || fieldNames[0];
-                const f2 = fieldNames.find(f => f !== '_id' && f !== 'id' && f !== f1) || fieldNames[1];
-                if (f1 && f2) {
-                    suggestions.push({
-                        question: `List ${f1} and ${f2} from ${tableName}`,
-                        description: `Show only selected fields from ${tableName}`
-                    });
-                }
+
+                // Ranking suggestion
+                suggestions.push({
+                    question: `Show top 10 by ${numField}`,
+                    description: `Rank records by highest ${numField}`
+                });
+
+                // Distribution suggestion
+                suggestions.push({
+                    question: `Show ${numField} distribution`,
+                    description: `Analyze the spread of ${numField} values`
+                });
             }
 
-            // 4. Active filter (if isActive field exists)
-            if (fieldNames.some(f => f.toLowerCase() === 'isactive' || f.toLowerCase() === 'active')) {
+            // 3. Find categorical columns for grouping
+            const categoricalFields = fieldNames.filter(f =>
+                ['category', 'type', 'status', 'country', 'region', 'group'].some(c =>
+                    f.toLowerCase().includes(c)
+                )
+            );
+
+            if (categoricalFields.length > 0 && numericFields.length > 0) {
                 suggestions.push({
-                    question: `Show active ${tableName}`,
-                    description: `Filter ${tableName} where status is active`
+                    question: `Average ${numericFields[0].name || numericFields[0]} by ${categoricalFields[0]}`,
+                    description: `Breakdown analysis by category`
                 });
             }
 
-            // 5. Recent records (if createdAt exists)
-            if (fieldNames.some(f => f.toLowerCase() === 'createdat' || f.toLowerCase() === 'created_at' || f.toLowerCase() === 'date')) {
+            // 4. Date-based analysis if date column exists
+            const dateFields = fieldNames.filter(f =>
+                ['date', 'created', 'timestamp', 'time'].some(d => f.toLowerCase().includes(d))
+            );
+
+            if (dateFields.length > 0) {
                 suggestions.push({
-                    question: `Show ${tableName} from last 30 days`,
-                    description: `Display recently created ${tableName}`
+                    question: `Show trend over time`,
+                    description: `Analyze how data changes over time`
+                });
+            }
+
+            // 5. Extreme value analysis
+            if (numericFields.length > 0) {
+                suggestions.push({
+                    question: `Find the lowest ${numericFields[0].name || numericFields[0]}`,
+                    description: `Identify minimum values`
                 });
             }
         }
 
-        // Return max 5 suggestions
-        return suggestions.slice(0, 5);
+        // Return max 6 suggestions
+        return suggestions.slice(0, 6);
 
     } catch (error) {
         console.error('Error generating suggestions:', error);
         return [
             { question: "Show all records", description: "Display all available data" },
-            { question: "Count total records", description: "Get the total count of entries" }
+            { question: "Count total records", description: "Get the total count of entries" },
+            { question: "What is the average value?", description: "Calculate average of numeric columns" }
         ];
     }
 }
@@ -496,10 +701,42 @@ function getSystemPrompt(dbType) {
     return SYSTEM_PROMPTS.sql; // Default to SQL
 }
 
+/**
+ * Generate a clarification request when query intent is unclear
+ * @param {string} question - User's question
+ * @param {Object} schema - Database schema
+ * @returns {Object} - Clarification data
+ */
+function generateClarification(question, schema) {
+    try {
+        const schemaObj = typeof schema === 'string' ? JSON.parse(schema) : schema;
+        const intent = QueryPlanner.parseQueryIntent(question, schemaObj);
+
+        if (intent.clarificationNeeded) {
+            const questions = QueryPlanner.generateClarifyingQuestions(intent, schemaObj);
+            const suggestions = QueryPlanner.suggestRelatedQueries(intent, schemaObj);
+
+            return {
+                needed: true,
+                message: intent.suggestedClarification,
+                questions,
+                suggestedQueries: suggestions
+            };
+        }
+
+        return { needed: false };
+    } catch (error) {
+        return { needed: false, error: error.message };
+    }
+}
+
 module.exports = {
     generateQuery,
     fixQuery,
     generateResponse,
     generateQuerySuggestions,
-    streamQueryGeneration
+    streamQueryGeneration,
+    generateClarification,
+    extractJSON,
+    getSystemPrompt
 };
