@@ -26,5 +26,5 @@ services:
       - key: GOOGLE_CLIENT_SECRET
         sync: false  # Set manually in dashboard
       - key: CORS_ORIGIN
-        value: https://your-frontend-domain.netlify.app  # Update with actual frontend URL
+        value: https://data-query-pro.vercel.app  # Production frontend URL
     healthCheckPath: /api/health

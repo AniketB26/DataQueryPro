@@ -32,8 +32,39 @@ const app = express();
 // Security Middleware
 // =================================
 
+// Parse allowed origins from env (supports comma-separated list)
+const allowedOrigins = (process.env.CORS_ORIGIN || 'http://localhost:3000')
+    .split(',')
+    .map(origin => origin.trim().replace(/\/+$/, '')); // Remove trailing slashes
+
+// CORS configuration — must come BEFORE helmet so preflight OPTIONS are handled
+app.use(cors({
+    origin: function (origin, callback) {
+        // Allow requests with no origin (mobile apps, curl, server-to-server)
+        if (!origin) return callback(null, true);
+        // Strip trailing slash from incoming origin for comparison
+        const cleanOrigin = origin.replace(/\/+$/, '');
+        if (allowedOrigins.includes(cleanOrigin)) {
+            return callback(null, cleanOrigin);
+        }
+        console.warn(`⚠️  CORS blocked origin: ${origin}`);
+        return callback(new Error('Not allowed by CORS'));
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+// Explicitly handle preflight OPTIONS for all routes
+app.options('*', cors());
+
 // Helmet for security headers
-app.use(helmet());
+// crossOriginOpenerPolicy must be 'same-origin-allow-popups' to allow
+// Google Identity Services popup to communicate via window.postMessage
+app.use(helmet({
+    crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' },
+    crossOriginEmbedderPolicy: false, // Required for Google GIS script loading
+}));
 
 // Rate limiting to prevent abuse
 const limiter = rateLimit({
@@ -42,14 +73,6 @@ const limiter = rateLimit({
     message: { error: 'Too many requests, please try again later.' }
 });
 app.use('/api/', limiter);
-
-// CORS configuration
-app.use(cors({
-    origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization']
-}));
 
 // =================================
 // Body Parsing Middleware
