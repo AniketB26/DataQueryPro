@@ -19,7 +19,7 @@ services:
         sync: false  # Set manually in dashboard
       - key: MONGODB_URI
         sync: false  # Set manually in dashboard
-      - key: GROQ_API_KEY
+      - key: GEMINI_API_KEY
         sync: false  # Set manually in dashboard
       - key: GOOGLE_CLIENT_ID
         sync: false  # Set manually in dashboard

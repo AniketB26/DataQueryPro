@@ -1,8 +1,8 @@
 /**
- * Enhanced Groq Query Translator Module
+ * Enhanced Gemini Query Translator Module
  * 
  * Advanced AI-powered query translator with data analyst capabilities.
- * Uses Groq API (OpenAI-compatible) to translate natural language
+ * Uses Google Gemini API to translate natural language
  * questions into executable database queries with support for:
  * - Complex analytics (window functions, percentiles, correlations)
  * - Semantic column matching
@@ -11,16 +11,48 @@
  * - StrataScratch-level SQL problems
  */
 
-const OpenAI = require('openai');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 const config = require('../config');
 const { generateFieldMappingHints } = require('../utils/fieldMapper');
 const { analyticsEngine, SemanticMapper, QueryPlanner } = require('../analytics');
 
-// Initialize Groq client (OpenAI-compatible)
-const groq = new OpenAI({
-    apiKey: config.groq.apiKey,
-    baseURL: config.groq.baseUrl
-});
+// Initialize Google Gemini client
+const genAI = new GoogleGenerativeAI(config.gemini.apiKey);
+
+/**
+ * Helper: Call Gemini with a system prompt and messages array.
+ * Converts the OpenAI-style messages [{role, content}] to Gemini format.
+ * @param {string} systemPrompt - System instruction
+ * @param {Array} messages - Array of {role: 'user'|'assistant', content: string}
+ * @param {Object} options - temperature, maxOutputTokens
+ * @returns {string} - The text response
+ */
+async function callGemini(systemPrompt, messages, options = {}) {
+    const model = genAI.getGenerativeModel({
+        model: config.gemini.model,
+        systemInstruction: systemPrompt,
+        generationConfig: {
+            temperature: options.temperature ?? config.gemini.temperature,
+            maxOutputTokens: options.maxOutputTokens ?? config.gemini.maxTokens,
+        },
+    });
+
+    // Convert messages to Gemini chat history + final message
+    // Gemini uses 'user' and 'model' roles (not 'assistant')
+    const geminiHistory = [];
+    for (const msg of messages.slice(0, -1)) {
+        geminiHistory.push({
+            role: msg.role === 'assistant' ? 'model' : 'user',
+            parts: [{ text: msg.content }],
+        });
+    }
+
+    const lastMessage = messages[messages.length - 1];
+
+    const chat = model.startChat({ history: geminiHistory });
+    const result = await chat.sendMessage(lastMessage.content);
+    return result.response.text();
+}
 
 /**
  * Extract JSON from response that might be wrapped in markdown code blocks or have extra text
@@ -366,14 +398,7 @@ async function generateQuery(question, schema, dbType, conversationHistory = [])
     });
 
     try {
-        const response = await groq.chat.completions.create({
-            model: config.groq.model,
-            messages,
-            temperature: config.groq.temperature,
-            max_tokens: config.groq.maxTokens
-        });
-
-        const content = response.choices[0].message.content;
+        const content = await callGemini(systemPrompt, messages);
         const result = extractJSON(content);
 
         return {
@@ -385,7 +410,7 @@ async function generateQuery(question, schema, dbType, conversationHistory = [])
             rawResponse: content
         };
     } catch (error) {
-        console.error('Groq query generation error:', error);
+        console.error('Gemini query generation error:', error);
         return {
             success: false,
             error: error.message,
@@ -427,14 +452,10 @@ Generate a corrected query that will work.`
     ];
 
     try {
-        const response = await groq.chat.completions.create({
-            model: config.groq.model,
-            messages,
+        const content = await callGemini(systemPrompt, messages, {
             temperature: 0.2, // Lower temperature for corrections
-            max_tokens: config.groq.maxTokens
         });
 
-        const content = response.choices[0].message.content;
         const result = extractJSON(content);
 
         return {
@@ -502,14 +523,12 @@ Report ONLY values from these COMPUTED RESULTS. Do not estimate or infer from an
     ];
 
     try {
-        const response = await groq.chat.completions.create({
-            model: config.groq.model,
-            messages,
+        const content = await callGemini(messages[0].content, messages.slice(1), {
             temperature: 0.5,
-            max_tokens: 800
+            maxOutputTokens: 800,
         });
 
-        return response.choices[0].message.content;
+        return content;
     } catch (error) {
         // Fallback to basic response with insights
         if (queryResult.success && queryResult.data) {
@@ -666,18 +685,30 @@ async function* streamQueryGeneration(question, schema, dbType) {
         { role: 'user', content: `QUESTION: ${question}\n\nGenerate the appropriate query.` }
     ];
 
-    const stream = await groq.chat.completions.create({
-        model: config.groq.model,
-        messages,
-        temperature: config.groq.temperature,
-        max_tokens: config.groq.maxTokens,
-        stream: true
+    // Gemini streaming uses generateContentStream
+    const model = genAI.getGenerativeModel({
+        model: config.gemini.model,
+        systemInstruction: systemPrompt,
+        generationConfig: {
+            temperature: config.gemini.temperature,
+            maxOutputTokens: config.gemini.maxTokens,
+        },
     });
 
-    for await (const chunk of stream) {
-        const content = chunk.choices[0]?.delta?.content;
-        if (content) {
-            yield content;
+    // Build chat contents for streaming
+    const geminiMessages = messages.map(msg => ({
+        role: msg.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: msg.content }],
+    }));
+
+    const result = await model.generateContentStream({
+        contents: geminiMessages,
+    });
+
+    for await (const chunk of result.stream) {
+        const text = chunk.text();
+        if (text) {
+            yield text;
         }
     }
 }

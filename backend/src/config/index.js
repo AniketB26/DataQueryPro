@@ -18,11 +18,10 @@ const config = {
         expiresIn: process.env.JWT_EXPIRES_IN || '24h'
     },
 
-    // Groq AI settings (OpenAI-compatible API)
-    groq: {
-        apiKey: process.env.GROQ_API_KEY,
-        model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
-        baseUrl: 'https://api.groq.com/openai/v1',
+    // Google Gemini AI settings
+    gemini: {
+        apiKey: process.env.GEMINI_API_KEY,
+        model: process.env.GEMINI_MODEL || 'gemini-1.5-pro',
         maxTokens: 2000,
         temperature: 0.1 // Low temperature for consistent query generation
     },
@@ -59,7 +58,7 @@ const config = {
 
 // Validate required configuration
 const validateConfig = () => {
-    const required = ['groq.apiKey'];
+    const required = ['gemini.apiKey'];
     const missing = [];
 
     required.forEach(key => {
