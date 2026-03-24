@@ -34,6 +34,7 @@ async function callGemini(systemPrompt, messages, options = {}) {
         generationConfig: {
             temperature: options.temperature ?? config.gemini.temperature,
             maxOutputTokens: options.maxOutputTokens ?? config.gemini.maxTokens,
+            responseMimeType: options.responseMimeType || "text/plain",
         },
     });
 
@@ -416,7 +417,9 @@ async function generateQuery(question, schema, dbType, conversationHistory = [])
     });
 
     try {
-        const content = await callGemini(systemPrompt, messages);
+        const content = await callGemini(systemPrompt, messages, {
+            responseMimeType: "application/json"
+        });
         const result = extractJSON(content);
 
         return {
@@ -472,6 +475,7 @@ Generate a corrected query that will work.`
     try {
         const content = await callGemini(systemPrompt, messages, {
             temperature: 0.2, // Lower temperature for corrections
+            responseMimeType: "application/json"
         });
 
         const result = extractJSON(content);
