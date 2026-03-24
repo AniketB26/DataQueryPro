@@ -37,21 +37,39 @@ async function callGemini(systemPrompt, messages, options = {}) {
         },
     });
 
-    // Convert messages to Gemini chat history + final message
-    // Gemini uses 'user' and 'model' roles (not 'assistant')
-    const geminiHistory = [];
-    for (const msg of messages.slice(0, -1)) {
-        geminiHistory.push({
-            role: msg.role === 'assistant' ? 'model' : 'user',
-            parts: [{ text: msg.content }],
-        });
+    // 1. Filter out system messages (handled by systemInstruction)
+    const validMessages = messages.filter(m => m.role !== 'system');
+
+    // 2. Merge consecutive messages with the same role (Gemini requires alternating roles)
+    const mergedHistory = [];
+    for (const msg of validMessages) {
+        const geminiRole = msg.role === 'assistant' ? 'model' : 'user';
+
+        if (mergedHistory.length > 0 && mergedHistory[mergedHistory.length - 1].role === geminiRole) {
+            mergedHistory[mergedHistory.length - 1].parts[0].text += '\n\n' + msg.content;
+        } else {
+            mergedHistory.push({
+                role: geminiRole,
+                parts: [{ text: msg.content }]
+            });
+        }
     }
 
-    const lastMessage = messages[messages.length - 1];
+    if (mergedHistory.length === 0) {
+        throw new Error('No user messages to send to Gemini.');
+    }
 
-    const chat = model.startChat({ history: geminiHistory });
-    const result = await chat.sendMessage(lastMessage.content);
-    return result.response.text();
+    // 3. Send message
+    const lastMessage = mergedHistory.pop();
+
+    if (mergedHistory.length > 0) {
+        const chat = model.startChat({ history: mergedHistory });
+        const result = await chat.sendMessage(lastMessage.parts[0].text);
+        return result.response.text();
+    } else {
+        const result = await model.generateContent(lastMessage.parts[0].text);
+        return result.response.text();
+    }
 }
 
 /**
@@ -695,11 +713,23 @@ async function* streamQueryGeneration(question, schema, dbType) {
         },
     });
 
-    // Build chat contents for streaming
-    const geminiMessages = messages.map(msg => ({
-        role: msg.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: msg.content }],
-    }));
+    // 1. Filter out system messages (handled by systemInstruction)
+    const validMessages = messages.filter(m => m.role !== 'system');
+
+    // 2. Merge consecutive messages with the same role
+    const geminiMessages = [];
+    for (const msg of validMessages) {
+        const geminiRole = msg.role === 'assistant' ? 'model' : 'user';
+
+        if (geminiMessages.length > 0 && geminiMessages[geminiMessages.length - 1].role === geminiRole) {
+            geminiMessages[geminiMessages.length - 1].parts[0].text += '\n\n' + msg.content;
+        } else {
+            geminiMessages.push({
+                role: geminiRole,
+                parts: [{ text: msg.content }]
+            });
+        }
+    }
 
     const result = await model.generateContentStream({
         contents: geminiMessages,

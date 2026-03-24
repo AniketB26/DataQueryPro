@@ -28,6 +28,9 @@ const { errorHandler } = require('./middleware/errorHandler');
 // Initialize Express app
 const app = express();
 
+// Trust proxy for rate limiting behind Render's load balancer
+app.set('trust proxy', 1);
+
 // =================================
 // Security Middleware
 // =================================
