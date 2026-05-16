@@ -83,7 +83,7 @@ class MongoConnector extends BaseConnector {
             // Get sample documents to infer schema
             const sampleDocs = await this.db.collection(collectionName)
                 .find({})
-                .limit(10)
+                .limit(this.config.schemaSampleSize || 50)
                 .toArray();
 
             // Infer fields from sample documents
@@ -91,11 +91,17 @@ class MongoConnector extends BaseConnector {
 
             // Get document count
             const count = await this.db.collection(collectionName).countDocuments();
+            const indexes = await this.db.collection(collectionName).indexes().catch(() => []);
 
             schema.push({
                 name: collectionName,
                 fields,
-                documentCount: count
+                documentCount: count,
+                indexes: indexes.map(index => ({
+                    name: index.name,
+                    key: index.key,
+                    unique: Boolean(index.unique)
+                }))
             });
         }
 
@@ -118,9 +124,11 @@ class MongoConnector extends BaseConnector {
             this._extractFields(doc, '', fieldMap);
         }
 
-        return Array.from(fieldMap.entries()).map(([name, types]) => ({
+        return Array.from(fieldMap.entries()).map(([name, info]) => ({
             name,
-            types: Array.from(types)
+            types: Array.from(info.types),
+            occurrenceCount: info.occurrenceCount,
+            sampleValues: Array.from(info.sampleValues).slice(0, 5)
         }));
     }
 
@@ -133,9 +141,19 @@ class MongoConnector extends BaseConnector {
             const type = this._getMongoType(value);
 
             if (!fieldMap.has(fieldName)) {
-                fieldMap.set(fieldName, new Set());
+                fieldMap.set(fieldName, {
+                    types: new Set(),
+                    occurrenceCount: 0,
+                    sampleValues: new Set()
+                });
             }
-            fieldMap.get(fieldName).add(type);
+            const info = fieldMap.get(fieldName);
+            info.types.add(type);
+            info.occurrenceCount += 1;
+
+            if (this._isSafeSampleValue(fieldName, value) && info.sampleValues.size < 5) {
+                info.sampleValues.add(String(value));
+            }
 
             // Recurse into nested objects (but not arrays or special types)
             if (value && typeof value === 'object' && !Array.isArray(value) &&
@@ -158,11 +176,34 @@ class MongoConnector extends BaseConnector {
         return typeof value;
     }
 
+    _isSafeSampleValue(fieldName, value) {
+        const lowerField = fieldName.toLowerCase();
+        const blockedTerms = [
+            'password', 'token', 'secret', 'email', 'phone', 'address',
+            'name', 'ssn', 'credit', 'card', 'auth', 'key'
+        ];
+
+        if (blockedTerms.some(term => lowerField.includes(term))) {
+            return false;
+        }
+
+        if (value === null || value === undefined) return false;
+        if (typeof value === 'number' || typeof value === 'boolean') return true;
+        if (value instanceof Date) return true;
+
+        if (typeof value === 'string') {
+            const trimmed = value.trim();
+            return trimmed.length > 0 && trimmed.length <= 40;
+        }
+
+        return false;
+    }
+
     /**
      * Execute a MongoDB query
      * Query format: { collection: 'name', operation: 'find|aggregate|...', query: {...}, options: {...} }
      */
-    async runQuery(queryString) {
+    async runQuery(queryString, options = {}) {
         if (!this.isConnected) {
             throw new Error('Not connected to database');
         }
@@ -180,6 +221,15 @@ class MongoConnector extends BaseConnector {
                 }
             } else {
                 query = queryString;
+            }
+
+            const validation = this.validateQuery(query, options);
+            if (!validation.valid) {
+                return {
+                    success: false,
+                    error: validation.reason,
+                    query: queryString
+                };
             }
 
             // Apply fuzzy matching for collection name
@@ -208,9 +258,15 @@ class MongoConnector extends BaseConnector {
                     // Support both 'filter' and 'query' field names
                     const findFilter = query.filter || query.query || {};
                     const projection = query.projection || {};
+                    const sort = query.sort || query.options?.sort || {};
+                    const limit = Math.min(
+                        Math.max(parseInt(query.limit || query.options?.limit || 100, 10) || 100, 1),
+                        options.maxLimit || 1000
+                    );
                     result = await collection
                         .find(findFilter, { projection })
-                        .limit(query.limit || 100)
+                        .sort(sort)
+                        .limit(limit)
                         .toArray();
                     break;
 
@@ -375,7 +431,16 @@ class MongoConnector extends BaseConnector {
         for (const collection of this.schema.collections) {
             schemaStr += `\n${collection.name} (${collection.documentCount} documents):\n`;
             for (const field of collection.fields) {
-                schemaStr += `  - ${field.name}: ${field.types.join(' | ')}\n`;
+                const samples = field.sampleValues?.length
+                    ? ` [safe examples: ${field.sampleValues.slice(0, 3).join(', ')}]`
+                    : '';
+                schemaStr += `  - ${field.name}: ${field.types.join(' | ')}${samples}\n`;
+            }
+            if (collection.indexes && collection.indexes.length > 0) {
+                schemaStr += '  Indexes:\n';
+                for (const index of collection.indexes.slice(0, 8)) {
+                    schemaStr += `    - ${index.name}${index.unique ? ' UNIQUE' : ''}: ${JSON.stringify(index.key)}\n`;
+                }
             }
         }
 
@@ -387,14 +452,14 @@ class MongoConnector extends BaseConnector {
      */
     validateQuery(query, options = {}) {
         const allowDestructive = options.allowDestructive || false;
-        const queryStr = typeof query === 'string' ? query : JSON.stringify(query);
+        const queryStr = (typeof query === 'string' ? query : JSON.stringify(query)).toLowerCase();
 
         // List of dangerous operations for MongoDB
         const dangerousOperations = [
             'deleteOne', 'deleteMany', 'drop', 'dropDatabase',
             'insertOne', 'insertMany', 'updateOne', 'updateMany',
             'replaceOne', 'findOneAndDelete', 'findOneAndReplace'
-        ];
+        ].map(op => op.toLowerCase());
 
         if (!allowDestructive) {
             for (const op of dangerousOperations) {

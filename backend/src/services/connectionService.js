@@ -185,11 +185,21 @@ async function createActiveConnection(userId, connectionId, dbType, connectionCo
 
         // Get schema
         const schema = await connector.getSchema();
+        const schemaText = typeof connector.formatSchemaForAI === 'function'
+            ? connector.formatSchemaForAI()
+            : JSON.stringify(schema, null, 2);
+
+        if (connectionId) {
+            updateConnectionSchema(connectionId, userId, schema).catch(error => {
+                console.error('Failed to cache connection schema:', error.message);
+            });
+        }
 
         // Store active connection
         activeConnections.set(sessionId, {
             connector,
             schema,
+            schemaText,
             dbType,
             connectionId,
             userId,
@@ -199,6 +209,7 @@ async function createActiveConnection(userId, connectionId, dbType, connectionCo
         return {
             sessionId,
             schema,
+            schemaText,
             dbType
         };
     } catch (error) {

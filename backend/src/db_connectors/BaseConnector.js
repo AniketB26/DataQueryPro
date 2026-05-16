@@ -62,6 +62,20 @@ class BaseConnector {
      */
     validateQuery(query, options = {}) {
         const allowDestructive = options.allowDestructive || false;
+        if (typeof query !== 'string') {
+            return { valid: true };
+        }
+
+        const trimmedQuery = query.trim();
+        const queryWithoutTrailingSemicolons = trimmedQuery.replace(/;+\s*$/, '');
+
+        if (queryWithoutTrailingSemicolons.includes(';')) {
+            return {
+                valid: false,
+                reason: 'Only one SQL statement is allowed per query'
+            };
+        }
+
         const upperQuery = query.toUpperCase();
         
         // List of dangerous operations
@@ -72,8 +86,16 @@ class BaseConnector {
             'DELETE FROM',
             'ALTER TABLE',
             'CREATE TABLE',
+            'CREATE INDEX',
+            'DROP INDEX',
             'INSERT INTO',
-            'UPDATE '
+            'UPDATE ',
+            'GRANT ',
+            'REVOKE ',
+            'CALL ',
+            'EXEC ',
+            'MERGE ',
+            'VACUUM'
         ];
         
         if (!allowDestructive) {

@@ -137,6 +137,89 @@ function extractJSON(content) {
 }
 
 /**
+ * Accept either the raw schema object or a richer context object:
+ * { raw: schemaObject, formatted: "human readable schema" }.
+ */
+function getRawSchema(schemaContext) {
+    if (!schemaContext) return null;
+    if (schemaContext.raw) return schemaContext.raw;
+    if (schemaContext.schema) return schemaContext.schema;
+
+    if (typeof schemaContext === 'string') {
+        try {
+            return JSON.parse(schemaContext);
+        } catch {
+            return null;
+        }
+    }
+
+    if (typeof schemaContext === 'object') {
+        return schemaContext;
+    }
+
+    return null;
+}
+
+function getSchemaPromptText(schemaContext) {
+    if (!schemaContext) return 'Schema not available';
+    if (schemaContext.formatted) return schemaContext.formatted;
+    if (schemaContext.schemaText) return schemaContext.schemaText;
+    if (typeof schemaContext === 'string') return schemaContext;
+
+    const rawSchema = getRawSchema(schemaContext);
+    if (!rawSchema) return 'Schema not available';
+
+    try {
+        return JSON.stringify(rawSchema, null, 2);
+    } catch {
+        return String(rawSchema);
+    }
+}
+
+function serializeGeneratedQuery(query) {
+    return typeof query === 'string' ? query : JSON.stringify(query, null, 2);
+}
+
+function inferQueryType(query, dbType) {
+    const type = (dbType || '').toLowerCase();
+
+    if (typeof query === 'string') {
+        const firstWord = query.trim().replace(/^[(\s]+/, '').split(/\s+/)[0]?.toUpperCase();
+        if (['SELECT', 'WITH', 'SHOW', 'DESCRIBE', 'EXPLAIN'].includes(firstWord)) return 'SELECT';
+        if (firstWord === 'INSERT') return 'INSERT';
+        if (firstWord === 'UPDATE') return 'UPDATE';
+        if (firstWord === 'DELETE') return 'DELETE';
+        return 'CUSTOM';
+    }
+
+    if (query && typeof query === 'object') {
+        const operation = String(query.operation || '').toLowerCase();
+        if (operation === 'aggregate' || query.aggregates || query.statistics || query.computedMetrics || query.groupBy) {
+            return 'AGGREGATE';
+        }
+        if (operation.startsWith('insert')) return 'INSERT';
+        if (operation.startsWith('update') || operation.startsWith('replace')) return 'UPDATE';
+        if (operation.startsWith('delete')) return 'DELETE';
+        if (['mongodb', 'mongo', 'excel', 'csv', 'file', 'xlsx'].includes(type)) return 'SELECT';
+    }
+
+    return 'CUSTOM';
+}
+
+function inferTableName(query) {
+    if (query && typeof query === 'object') {
+        return query.table || query.collection || null;
+    }
+
+    if (typeof query === 'string') {
+        const fromMatch = query.match(/\bFROM\s+[`"[]?([A-Za-z0-9_.$-]+)/i);
+        return fromMatch ? fromMatch[1].replace(/[`"\]]/g, '') : null;
+    }
+
+    return null;
+}
+
+/**
  * Enhanced system prompts for different database types
  * These prompts enable analyst-level query generation
  */
@@ -361,6 +444,33 @@ Your queries can now include these advanced operations:
 NEVER include text outside the JSON. Start with { and end with }.`
 };
 
+const SQL_DIALECT_RULES = {
+    mysql: `=== MYSQL DIALECT RULES ===
+Generate MySQL-compatible SQL only.
+- Use LIMIT for row limits.
+- Use backticks for identifiers only when quoting is necessary.
+- Use DATE_FORMAT(date_col, '%Y-%m') for monthly grouping.
+- Use YEAR(date_col), MONTH(date_col), QUARTER(date_col) for date parts.
+- Do NOT use DATE_TRUNC, ILIKE, RETURNING, :: casts, or PostgreSQL percentile syntax.
+- MySQL has window functions in version 8+, but avoid unsupported percentile functions unless the query can be expressed safely.`,
+
+    postgresql: `=== POSTGRESQL DIALECT RULES ===
+Generate PostgreSQL-compatible SQL only.
+- Use double quotes for identifiers only when quoting is necessary.
+- Use DATE_TRUNC('month', date_col) for monthly grouping.
+- Use ILIKE for case-insensitive text matching.
+- PostgreSQL supports CTEs, window functions, FILTER, and PERCENTILE_CONT where appropriate.
+- Do NOT use MySQL DATE_FORMAT, backticks, or SQLite date functions.`,
+
+    sqlite: `=== SQLITE DIALECT RULES ===
+Generate SQLite-compatible SQL only.
+- Use LIMIT for row limits.
+- Use double quotes for identifiers only when quoting is necessary.
+- Use strftime('%Y-%m', date_col) for monthly grouping.
+- SQLite does not support DATE_TRUNC, ILIKE, PERCENTILE_CONT, or many advanced PostgreSQL functions.
+- Prefer simple SELECT, GROUP BY, ORDER BY, CTEs, and supported window functions.`
+};
+
 /**
  * Generate a database query from natural language with advanced analytics support
  * @param {string} question - Natural language question
@@ -371,21 +481,29 @@ NEVER include text outside the JSON. Start with { and end with }.`
  */
 async function generateQuery(question, schema, dbType, conversationHistory = []) {
     const systemPrompt = getSystemPrompt(dbType);
+    const rawSchema = getRawSchema(schema);
+    const schemaPromptText = getSchemaPromptText(schema);
 
     // Get enhanced analytics hints
     let analyticsHints = '';
     try {
-        const schemaObj = typeof schema === 'string' ? JSON.parse(schema) : schema;
-        analyticsHints = SemanticMapper.generateSemanticHints(question, schemaObj);
+        if (rawSchema) {
+            analyticsHints = SemanticMapper.generateSemanticHints(question, rawSchema);
 
-        // Parse intent for additional context
-        const intent = QueryPlanner.parseQueryIntent(question, schemaObj);
-        if (intent.operations.length > 0) {
-            analyticsHints += '\n\nDETECTED INTENT:\n';
-            analyticsHints += intent.operations.map(op => `- ${op.type}`).join('\n');
-        }
-        if (intent.semanticFilter) {
-            analyticsHints += `\n- Sentiment: ${intent.semanticFilter.type} (${intent.semanticFilter.term})`;
+            const fieldMappingHints = generateFieldMappingHints(rawSchema);
+            if (fieldMappingHints) {
+                analyticsHints += `\n\n${fieldMappingHints}`;
+            }
+
+            // Parse intent for additional context
+            const intent = QueryPlanner.parseQueryIntent(question, rawSchema);
+            if (intent.operations.length > 0) {
+                analyticsHints += '\n\nDETECTED INTENT:\n';
+                analyticsHints += intent.operations.map(op => `- ${op.type}`).join('\n');
+            }
+            if (intent.semanticFilter) {
+                analyticsHints += `\n- Sentiment: ${intent.semanticFilter.type} (${intent.semanticFilter.term})`;
+            }
         }
     } catch (e) {
         // Continue without analytics hints if parsing fails
@@ -394,7 +512,7 @@ async function generateQuery(question, schema, dbType, conversationHistory = [])
     // Build messages array
     const messages = [
         { role: 'system', content: systemPrompt },
-        { role: 'user', content: `DATABASE SCHEMA:\n${schema}` }
+        { role: 'user', content: `DATABASE TYPE/DIALECT: ${dbType}\n\nDATABASE SCHEMA:\n${schemaPromptText}` }
     ];
 
     // Add analytics hints if available
@@ -425,6 +543,9 @@ async function generateQuery(question, schema, dbType, conversationHistory = [])
         return {
             success: true,
             query: result.query,
+            generatedQuery: serializeGeneratedQuery(result.query),
+            queryType: inferQueryType(result.query, dbType),
+            tableName: inferTableName(result.query),
             explanation: result.explanation,
             confidence: result.confidence || 0.8,
             insights: result.insights || [],
@@ -451,10 +572,11 @@ async function generateQuery(question, schema, dbType, conversationHistory = [])
  */
 async function fixQuery(originalQuestion, failedQuery, errorMessage, schema, dbType) {
     const systemPrompt = getSystemPrompt(dbType);
+    const schemaPromptText = getSchemaPromptText(schema);
 
     const messages = [
         { role: 'system', content: systemPrompt },
-        { role: 'user', content: `DATABASE SCHEMA:\n${schema}` },
+        { role: 'user', content: `DATABASE TYPE/DIALECT: ${dbType}\n\nDATABASE SCHEMA:\n${schemaPromptText}` },
         { role: 'user', content: `ORIGINAL QUESTION: ${originalQuestion}` },
         { role: 'assistant', content: JSON.stringify({ query: failedQuery }) },
         {
@@ -483,6 +605,9 @@ Generate a corrected query that will work.`
         return {
             success: true,
             query: result.query,
+            generatedQuery: serializeGeneratedQuery(result.query),
+            queryType: inferQueryType(result.query, dbType),
+            tableName: inferTableName(result.query),
             explanation: result.explanation,
             wasFixed: true,
             originalError: errorMessage
@@ -574,7 +699,10 @@ Report ONLY values from these COMPUTED RESULTS. Do not estimate or infer from an
 function generateQuerySuggestions(schema, dbType) {
     try {
         // Parse schema if string
-        const schemaObj = typeof schema === 'string' ? JSON.parse(schema) : schema;
+        const schemaObj = getRawSchema(schema);
+        if (!schemaObj) {
+            throw new Error('Schema unavailable');
+        }
 
         // Get tables/collections
         const tables = schemaObj.tables || schemaObj.collections || [];
@@ -700,10 +828,11 @@ function generateQuerySuggestions(schema, dbType) {
  */
 async function* streamQueryGeneration(question, schema, dbType) {
     const systemPrompt = getSystemPrompt(dbType);
+    const schemaPromptText = getSchemaPromptText(schema);
 
     const messages = [
         { role: 'system', content: systemPrompt },
-        { role: 'user', content: `DATABASE SCHEMA:\n${schema}` },
+        { role: 'user', content: `DATABASE TYPE/DIALECT: ${dbType}\n\nDATABASE SCHEMA:\n${schemaPromptText}` },
         { role: 'user', content: `QUESTION: ${question}\n\nGenerate the appropriate query.` }
     ];
 
@@ -751,10 +880,19 @@ async function* streamQueryGeneration(question, schema, dbType) {
  * Get the appropriate system prompt for a database type
  */
 function getSystemPrompt(dbType) {
-    const type = dbType.toLowerCase();
+    const type = String(dbType || 'sql').toLowerCase();
 
-    if (['mysql', 'postgresql', 'postgres', 'sqlite', 'sql'].includes(type)) {
-        return SYSTEM_PROMPTS.sql;
+    if (type === 'mysql') {
+        return `${SYSTEM_PROMPTS.sql}\n\n${SQL_DIALECT_RULES.mysql}`;
+    }
+    if (type === 'postgresql' || type === 'postgres') {
+        return `${SYSTEM_PROMPTS.sql}\n\n${SQL_DIALECT_RULES.postgresql}`;
+    }
+    if (type === 'sqlite') {
+        return `${SYSTEM_PROMPTS.sql}\n\n${SQL_DIALECT_RULES.sqlite}`;
+    }
+    if (type === 'sql') {
+        return `${SYSTEM_PROMPTS.sql}\n\nWhen the exact SQL dialect is unknown, prefer ANSI SQL and avoid dialect-specific functions.`;
     }
     if (['mongodb', 'mongo'].includes(type)) {
         return SYSTEM_PROMPTS.mongodb;
@@ -774,7 +912,7 @@ function getSystemPrompt(dbType) {
  */
 function generateClarification(question, schema) {
     try {
-        const schemaObj = typeof schema === 'string' ? JSON.parse(schema) : schema;
+        const schemaObj = getRawSchema(schema);
         const intent = QueryPlanner.parseQueryIntent(question, schemaObj);
 
         if (intent.clarificationNeeded) {
@@ -803,5 +941,10 @@ module.exports = {
     streamQueryGeneration,
     generateClarification,
     extractJSON,
-    getSystemPrompt
+    getSystemPrompt,
+    getRawSchema,
+    getSchemaPromptText,
+    inferQueryType,
+    inferTableName,
+    serializeGeneratedQuery
 };

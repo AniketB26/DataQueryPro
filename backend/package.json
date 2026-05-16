@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "set NODE_OPTIONS=--openssl-legacy-provider && nodemon src/index.js",
-    "test": "jest"
+    "test": "jest",
+    "eval": "node scripts/run-evals.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

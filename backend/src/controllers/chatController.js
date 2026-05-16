@@ -51,18 +51,20 @@ async function processQuery(req, res) {
             message.trim()
         );
         
-        // Save query to history if connectionId provided
-        if (connectionId && result.success && result.generatedQuery) {
+        // Save query to history when this active session is tied to a saved connection
+        const historyConnectionId = connectionId || connection.connectionId;
+        if (historyConnectionId && result.success && (result.generatedQuery || result.query)) {
             try {
-                await queryHistoryService.saveQuery(req.user.userId, connectionId, {
+                const resultPayload = result.result || {};
+                await queryHistoryService.saveQuery(req.user.userId, historyConnectionId, {
                     naturalQuery: message.trim(),
-                    generatedQuery: result.generatedQuery,
+                    generatedQuery: result.generatedQuery || result.query,
                     queryType: result.queryType || 'SELECT',
                     result: {
                         success: result.success,
-                        data: result.data,
-                        rowCount: result.rowCount,
-                        columns: result.columns,
+                        data: resultPayload.data,
+                        rowCount: resultPayload.rowCount,
+                        columns: resultPayload.columns,
                         error: result.error
                     },
                     databaseType: connection.dbType,

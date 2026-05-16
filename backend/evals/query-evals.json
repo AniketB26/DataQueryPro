@@ -1,0 +1,121 @@
+[
+  {
+    "id": "mysql_monthly_revenue",
+    "dbType": "mysql",
+    "question": "Show monthly revenue from orders",
+    "schema": {
+      "dbType": "mysql",
+      "database": "shop",
+      "tables": [
+        {
+          "name": "orders",
+          "rowCount": 1200,
+          "columns": [
+            { "name": "id", "type": "int", "key": "PRI", "nullable": false },
+            { "name": "total_amount", "type": "decimal", "nullable": false },
+            { "name": "created_at", "type": "datetime", "nullable": false }
+          ]
+        }
+      ]
+    },
+    "expected": {
+      "contains": ["orders", "SUM", "DATE_FORMAT"],
+      "notContains": ["DATE_TRUNC", "strftime"]
+    }
+  },
+  {
+    "id": "postgres_monthly_revenue",
+    "dbType": "postgresql",
+    "question": "Show monthly revenue from orders",
+    "schema": {
+      "dbType": "postgresql",
+      "database": "shop",
+      "tables": [
+        {
+          "name": "orders",
+          "rowCount": 1200,
+          "columns": [
+            { "name": "id", "type": "integer", "key": "PRI", "nullable": false },
+            { "name": "total_amount", "type": "numeric", "nullable": false },
+            { "name": "created_at", "type": "timestamp", "nullable": false }
+          ]
+        }
+      ]
+    },
+    "expected": {
+      "contains": ["orders", "SUM", "DATE_TRUNC"],
+      "notContains": ["DATE_FORMAT", "strftime"]
+    }
+  },
+  {
+    "id": "sqlite_monthly_revenue",
+    "dbType": "sqlite",
+    "question": "Show monthly revenue from orders",
+    "schema": {
+      "dbType": "sqlite",
+      "database": "shop.db",
+      "tables": [
+        {
+          "name": "orders",
+          "rowCount": 1200,
+          "columns": [
+            { "name": "id", "type": "INTEGER", "key": "PRI", "nullable": false },
+            { "name": "total_amount", "type": "REAL", "nullable": false },
+            { "name": "created_at", "type": "TEXT", "nullable": false }
+          ]
+        }
+      ]
+    },
+    "expected": {
+      "contains": ["orders", "SUM", "strftime"],
+      "notContains": ["DATE_TRUNC", "DATE_FORMAT"]
+    }
+  },
+  {
+    "id": "mongodb_top_rated_products",
+    "dbType": "mongodb",
+    "question": "Show top 5 products by rating",
+    "schema": {
+      "dbType": "mongodb",
+      "database": "shop",
+      "collections": [
+        {
+          "name": "products",
+          "documentCount": 500,
+          "fields": [
+            { "name": "_id", "types": ["ObjectId"] },
+            { "name": "title", "types": ["string"] },
+            { "name": "rating", "types": ["number"], "sampleValues": ["4.8", "4.2"] }
+          ]
+        }
+      ]
+    },
+    "expected": {
+      "contains": ["products", "sort", "rating", "limit"],
+      "notContains": ["delete", "update", "insert"]
+    }
+  },
+  {
+    "id": "file_average_sales_by_region",
+    "dbType": "csv",
+    "question": "Average sales by region",
+    "schema": {
+      "dbType": "csv",
+      "fileName": "sales.csv",
+      "tables": [
+        {
+          "name": "sales",
+          "rowCount": 100,
+          "columns": [
+            { "name": "region", "type": "category", "nullable": false, "sampleValues": ["North", "South"] },
+            { "name": "sales_amount", "type": "number", "nullable": false, "sampleValues": [120, 240] }
+          ]
+        }
+      ]
+    },
+    "expected": {
+      "contains": ["sales", "groupBy", "AVG"],
+      "notContains": ["sample"]
+    }
+  }
+]

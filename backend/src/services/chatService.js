@@ -52,9 +52,15 @@ function getChatHistory(chatSessionId) {
  */
 async function processMessage(chatSessionId, connectionSessionId, userMessage) {
     // Get or create chat session
-    if (!chatHistory.has(chatSessionId)) {
-        createChatSession(connectionSessionId);
-        chatHistory.get(chatSessionId).connectionSessionId = connectionSessionId;
+    if (!chatSessionId) {
+        const created = createChatSession(connectionSessionId);
+        chatSessionId = created.chatSessionId;
+    } else if (!chatHistory.has(chatSessionId)) {
+        chatHistory.set(chatSessionId, {
+            connectionSessionId,
+            messages: [],
+            createdAt: Date.now()
+        });
     }
 
     const session = chatHistory.get(chatSessionId);
@@ -68,6 +74,14 @@ async function processMessage(chatSessionId, connectionSessionId, userMessage) {
     const schema = connection.schema;
     const dbType = connection.dbType;
     const connector = connection.connector;
+    const schemaContext = {
+        raw: schema,
+        formatted: connection.schemaText || (
+            typeof connector?.formatSchemaForAI === 'function'
+                ? connector.formatSchemaForAI()
+                : JSON.stringify(schema, null, 2)
+        )
+    };
 
     // Add user message to history
     const userMsg = {
@@ -81,9 +95,9 @@ async function processMessage(chatSessionId, connectionSessionId, userMessage) {
         // Generate query using OpenAI
         const queryResult = await openai.generateQuery(
             userMessage,
-            schema,
+            schemaContext,
             dbType,
-            session.messages.slice(-10) // Last 10 messages for context
+            session.messages.slice(0, -1).slice(-10) // Previous messages for follow-up context
         );
 
         if (!queryResult.success) {
@@ -113,7 +127,7 @@ async function processMessage(chatSessionId, connectionSessionId, userMessage) {
                 userMessage,
                 queryResult.query,
                 execResult.error,
-                schema,
+                schemaContext,
                 dbType
             );
 
@@ -123,6 +137,9 @@ async function processMessage(chatSessionId, connectionSessionId, userMessage) {
                 // Update query with fixed version
                 if (execResult.success) {
                     queryResult.query = fixedQuery.query;
+                    queryResult.generatedQuery = fixedQuery.generatedQuery;
+                    queryResult.queryType = fixedQuery.queryType;
+                    queryResult.tableName = fixedQuery.tableName;
                     queryResult.wasFixed = true;
                 }
             }
@@ -135,12 +152,16 @@ async function processMessage(chatSessionId, connectionSessionId, userMessage) {
             queryResult.query
         );
 
+        const serializedQuery = typeof queryResult.query === 'string'
+            ? queryResult.query
+            : JSON.stringify(queryResult.query, null, 2);
+
         // Create assistant message
         const assistantMsg = {
             role: 'assistant',
             content: nlResponse,
             timestamp: Date.now(),
-            query: queryResult.query,
+            query: serializedQuery,
             queryExplanation: queryResult.explanation,
             result: execResult.success ? {
                 data: execResult.data,
@@ -155,9 +176,10 @@ async function processMessage(chatSessionId, connectionSessionId, userMessage) {
         return {
             success: execResult.success,
             message: nlResponse,
-            query: typeof queryResult.query === 'string'
-                ? queryResult.query
-                : JSON.stringify(queryResult.query, null, 2),
+            query: serializedQuery,
+            generatedQuery: queryResult.generatedQuery || serializedQuery,
+            queryType: queryResult.queryType,
+            tableName: queryResult.tableName,
             queryExplanation: queryResult.explanation,
             result: execResult.success ? {
                 data: execResult.data?.slice(0, 100), // Limit to 100 rows

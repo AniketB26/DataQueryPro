@@ -169,11 +169,42 @@ class FileConnector extends BaseConnector {
                 name: col,
                 type,
                 nullable: data.some(row => row[col] === null || row[col] === undefined || row[col] === ''),
-                sampleValues: values.slice(0, 3)
+                uniqueCount: new Set(values.map(v => String(v))).size,
+                sampleValues: this._getSafeSampleValues(col, values)
             });
         }
 
         return columnTypes;
+    }
+
+    _getSafeSampleValues(columnName, values) {
+        const lowerColumn = columnName.toLowerCase();
+        const blockedTerms = [
+            'password', 'token', 'secret', 'email', 'phone', 'address',
+            'name', 'ssn', 'credit', 'card', 'auth', 'key'
+        ];
+
+        if (blockedTerms.some(term => lowerColumn.includes(term))) {
+            return [];
+        }
+
+        const samples = [];
+        const seen = new Set();
+
+        for (const value of values) {
+            if (value === null || value === undefined || value === '') continue;
+            if (typeof value === 'object') continue;
+
+            const text = String(value).trim();
+            if (!text || text.length > 40 || seen.has(text)) continue;
+
+            samples.push(value);
+            seen.add(text);
+
+            if (samples.length >= 5) break;
+        }
+
+        return samples;
     }
 
     /**
@@ -531,9 +562,8 @@ class FileConnector extends BaseConnector {
 
                 // Find actual column name (case-insensitive)
                 const actualColumn = this._findColumnName(row, column);
-                if (!actualColumn && operator !== 'IS NULL') {
-                    // Column doesn't exist - skip this filter
-                    continue;
+                if (!actualColumn) {
+                    throw new Error(`Filter column not found: ${column}`);
                 }
 
                 const cellValue = actualColumn ? row[actualColumn] : undefined;
@@ -604,6 +634,8 @@ class FileConnector extends BaseConnector {
                 const actualCol = this._findColumnName(row, col);
                 if (actualCol) {
                     newRow[actualCol] = row[actualCol];
+                } else {
+                    throw new Error(`Selected column not found: ${col}`);
                 }
             }
             return newRow;
@@ -620,7 +652,10 @@ class FileConnector extends BaseConnector {
         const dir = direction.toUpperCase() === 'DESC' ? -1 : 1;
 
         // Find actual column name from first row
-        const actualColumn = this._findColumnName(data[0], column) || column;
+        const actualColumn = this._findColumnName(data[0], column);
+        if (!actualColumn) {
+            throw new Error(`Order by column not found: ${column}`);
+        }
 
         return data.sort((a, b) => {
             if (a[actualColumn] < b[actualColumn]) return -1 * dir;
@@ -633,12 +668,20 @@ class FileConnector extends BaseConnector {
      * Apply grouping with aggregations
      */
     _applyGroupBy(data, groupBy, aggregates = []) {
+        if (!data || data.length === 0) return data;
+
         const groups = new Map();
+        const groupColumns = Array.isArray(groupBy) ? groupBy : [groupBy];
+        const actualGroupColumns = groupColumns.map(col => {
+            const actual = this._findColumnName(data[0], col);
+            if (!actual) {
+                throw new Error(`Group by column not found: ${col}`);
+            }
+            return actual;
+        });
 
         for (const row of data) {
-            const key = Array.isArray(groupBy)
-                ? groupBy.map(g => row[g]).join('|||')
-                : row[groupBy];
+            const key = actualGroupColumns.map(g => row[g]).join('|||');
 
             if (!groups.has(key)) {
                 groups.set(key, []);
@@ -652,18 +695,22 @@ class FileConnector extends BaseConnector {
             const resultRow = {};
 
             // Add group by columns
-            if (Array.isArray(groupBy)) {
-                groupBy.forEach((col, i) => {
-                    resultRow[col] = key.split('|||')[i];
-                });
-            } else {
-                resultRow[groupBy] = key;
-            }
+            actualGroupColumns.forEach((col, i) => {
+                resultRow[col] = key.split('|||')[i];
+            });
 
             // Apply aggregates
             for (const agg of aggregates) {
                 const { function: fn, column, alias } = agg;
-                const values = rows.map(r => r[column]).filter(v => v !== null && v !== undefined);
+                const actualAggColumn = column === '*'
+                    ? '*'
+                    : this._findColumnName(rows[0], column);
+                if (!actualAggColumn) {
+                    throw new Error(`Aggregate column not found: ${column}`);
+                }
+                const values = actualAggColumn === '*'
+                    ? rows
+                    : rows.map(r => r[actualAggColumn]).filter(v => v !== null && v !== undefined);
 
                 switch (fn.toUpperCase()) {
                     case 'COUNT':
@@ -709,7 +756,10 @@ class FileConnector extends BaseConnector {
             for (const col of table.columns) {
                 schemaStr += `  - ${col.name}: ${col.type}`;
                 if (col.sampleValues && col.sampleValues.length > 0) {
-                    schemaStr += ` [type hint: ${col.sampleValues.slice(0, 2).join(', ')}]`;
+                    schemaStr += ` [safe examples: ${col.sampleValues.slice(0, 3).join(', ')}]`;
+                }
+                if (Number.isFinite(col.uniqueCount)) {
+                    schemaStr += ` [unique values: ${col.uniqueCount}]`;
                 }
                 schemaStr += '\n';
             }
